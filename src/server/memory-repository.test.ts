@@ -67,4 +67,74 @@ describe("MemoryRepository", () => {
     await expect(repo.createMemory({ title: "", reflection: "x", category: "gratitude", visibility: "private", wallId: "personal" }, userA)).rejects.toThrow("title");
     await expect(repo.createMemory({ title: "x", reflection: "x", category: "not-real" as "gratitude", visibility: "private", wallId: "personal" }, userA)).rejects.toThrow();
   });
+
+  it("shares only with communities where the owner has sharing permission", async () => {
+    const store = new InMemoryMemoryStore();
+    store.grantCommunityMembership(userA, "community-a", "A circle");
+    const repo = new MemoryRepository(store);
+    const item = await memory(repo);
+
+    const shared = await repo.updateMemory(item.id, { visibility: "selected-community", communityIds: ["community-a"] }, userA);
+    expect(shared.visibility).toBe("selected-community");
+    expect(await repo.getMemory(item.id, userA)).toEqual(expect.objectContaining({ visibility: "selected-community" }));
+    expect(await repo.listMemoriesForUser(userB, { ownership: "shared" })).toEqual([]);
+    await expect(repo.updateMemory(item.id, { communityIds: ["community-b"] }, userA)).rejects.toBeInstanceOf(MemoryPermissionError);
+
+    await expect(repo.getMemory(item.id, userB)).rejects.toBeInstanceOf(MemoryPermissionError);
+    store.grantCommunityMembership(userB, "community-a", "A circle");
+    expect((await repo.listMemoriesForUser(userB, { ownership: "shared" }))[0].id).toBe(item.id);
+  });
+
+  it("moves a shared memory back to private and removes it from community listings", async () => {
+    const store = new InMemoryMemoryStore();
+    store.grantCommunityMembership(userA, "community-a", "A circle");
+    store.grantCommunityMembership(userB, "community-a", "A circle");
+    const repo = new MemoryRepository(store);
+    const item = await repo.createMemory({ title: "Shared", reflection: "A useful moment", category: "growth", visibility: "selected-community", communityIds: ["community-a"], wallId: "personal" }, userA);
+
+    await repo.updateMemory(item.id, { visibility: "private" }, userA);
+    expect(await repo.listCommunityMemoriesForUser(userB)).toEqual([]);
+    await expect(repo.getMemory(item.id, userB)).rejects.toBeInstanceOf(MemoryPermissionError);
+  });
+
+  it("supports authorized comments, owner moderation, and reports", async () => {
+    const store = new InMemoryMemoryStore();
+    store.grantCommunityMembership(userA, "community-a", "A circle");
+    store.grantCommunityMembership(userB, "community-a", "A circle");
+    const repo = new MemoryRepository(store);
+    const item = await repo.createMemory({ title: "Shared", reflection: "A useful moment", category: "growth", visibility: "selected-community", communityIds: ["community-a"], wallId: "personal" }, userA);
+
+    const comment = await repo.createComment({ memoryId: item.id, body: "Thank you for sharing this." }, userB);
+    expect((await repo.listComments(item.id, userB)).map((entry) => entry.body)).toEqual(["Thank you for sharing this."]);
+    await expect(repo.deleteComment(comment.id, userA)).rejects.toBeInstanceOf(MemoryPermissionError);
+    await repo.moderateComment(comment.id, userA);
+    expect(await repo.listComments(item.id, userB)).toEqual([]);
+    const report = await repo.createReport({ targetType: "memory", targetId: item.id, reason: "harmful" }, userB);
+    expect(report.status).toBe("open");
+    expect((await repo.listModerationQueue(userA))[0].id).toBe(report.id);
+  });
+
+  it("searches only authorized memories with partial case-insensitive matching", async () => {
+    const store = new InMemoryMemoryStore();
+    store.grantCommunityMembership(userA, "community-a", "A circle");
+    store.grantCommunityMembership(userB, "community-a", "A circle");
+    const repo = new MemoryRepository(store);
+    await memory(repo, "Morning light");
+    const shared = await repo.createMemory({ title: "A Shared Light", reflection: "A community moment", category: "growth", visibility: "selected-community", communityIds: ["community-a"], wallId: "personal" }, userA);
+    await repo.createMemory({ title: "Private light", reflection: "Not for others", category: "growth", visibility: "private", wallId: "personal" }, userA);
+
+    expect((await repo.searchMemoriesForUser("LIGHT", userB)).map((entry) => entry.id)).toEqual([shared.id]);
+    expect((await repo.searchMemoriesForUser("LIGHT", userA)).map((entry) => entry.id)).toEqual([shared.id]);
+  });
+
+  it("validates image metadata and gates media reads by memory visibility", async () => {
+    const store = new InMemoryMemoryStore();
+    const repo = new MemoryRepository(store);
+    const item = await memory(repo);
+
+    const image = await repo.attachImage(item.id, { mediaType: "image/png", sizeBytes: 1024 }, userA);
+    expect(await repo.getMemoryMedia(item.id, userA)).toEqual(image);
+    await expect(repo.attachImage(item.id, { mediaType: "image/svg+xml", sizeBytes: 10 }, userA)).rejects.toThrow();
+    await expect(repo.getMemoryMedia(item.id, userB)).rejects.toBeInstanceOf(MemoryPermissionError);
+  });
 });
