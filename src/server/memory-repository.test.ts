@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { InMemoryMemoryStore, MemoryPermissionError, MemoryRepository } from "@/server/memory-repository";
+import { InMemoryMemoryStore, MemoryPermissionError, MemoryRepository, MemoryValidationError } from "@/server/memory-repository";
 
 const userA = "alice";
 const userB = "bob";
@@ -127,6 +127,14 @@ describe("MemoryRepository", () => {
     expect((await repo.searchMemoriesForUser("LIGHT", userA)).map((entry) => entry.id)).toEqual([shared.id]);
   });
 
+  it("searches public discovery without exposing selected-community or private memories", async () => {
+    const repo = await repository();
+    const publicMemory = await repo.createMemory({ title: "Public light", reflection: "Open to everyone", category: "growth", visibility: "public-discovery", wallId: "personal" }, userA);
+    await memory(repo, "Private light");
+    const result = await repo.searchPublicMemoriesForUser("LIGHT", userB);
+    expect(result.map((entry) => entry.id)).toEqual([publicMemory.id]);
+  });
+
   it("validates image metadata and gates media reads by memory visibility", async () => {
     const store = new InMemoryMemoryStore();
     const repo = new MemoryRepository(store);
@@ -136,5 +144,62 @@ describe("MemoryRepository", () => {
     expect(await repo.getMemoryMedia(item.id, userA)).toEqual(image);
     await expect(repo.attachImage(item.id, { mediaType: "image/svg+xml", sizeBytes: 10 }, userA)).rejects.toThrow();
     await expect(repo.getMemoryMedia(item.id, userB)).rejects.toBeInstanceOf(MemoryPermissionError);
+  });
+
+  it("supports public discovery while keeping narrower memories out of it", async () => {
+    const repo = await repository();
+    const privateMemory = await memory(repo, "Private note");
+    const shared = await repo.createMemory({ title: "Community note", reflection: "For a circle", category: "growth", visibility: "public-discovery", wallId: "personal" }, userA);
+    expect((await repo.listPublicMemoriesForUser(userB)).map((item) => item.id)).toEqual([shared.id]);
+    expect((await repo.listPublicMemoriesForUser(userA)).map((item) => item.id)).toEqual([shared.id]);
+
+    await expect(repo.updateMemory(shared.id, { visibility: "selected-community" }, userA)).rejects.toBeInstanceOf(MemoryValidationError);
+    await repo.updateMemory(shared.id, { visibility: "private" }, userA);
+    expect(await repo.listPublicMemoriesForUser(userB)).toEqual([]);
+    expect((await repo.getMemory(privateMemory.id, userA)).visibility).toBe("private");
+  });
+
+  it("allows public visibility without a community and transitions back with authorization", async () => {
+    const store = new InMemoryMemoryStore();
+    store.grantCommunityMembership(userA, "community-a", "A circle");
+    const repo = new MemoryRepository(store);
+    const item = await repo.createMemory({ title: "Open note", reflection: "A public reflection", category: "growth", visibility: "public-discovery", wallId: "personal" }, userA);
+    expect(item.communityIds).toEqual([]);
+    const selected = await repo.updateMemory(item.id, { visibility: "selected-community", communityIds: ["community-a"] }, userA);
+    expect(selected.visibility).toBe("selected-community");
+    expect(selected.communityIds).toEqual(["community-a"]);
+    await expect(repo.updateMemory(item.id, { visibility: "selected-community", communityIds: ["other"] }, userA)).rejects.toBeInstanceOf(MemoryPermissionError);
+  });
+
+  it("makes reactions idempotent per user and removes only that user's reaction", async () => {
+    const repo = await repository();
+    const item = await repo.createMemory({ title: "Open note", reflection: "A public reflection", category: "growth", visibility: "public-discovery", wallId: "personal" }, userA);
+    const first = await repo.createReaction({ memoryId: item.id }, userB);
+    const duplicate = await repo.createReaction({ memoryId: item.id }, userB);
+    expect(duplicate).toEqual(first);
+    expect(await repo.hasReaction(item.id, userB)).toBe(true);
+    expect(await repo.hasReaction(item.id, userA)).toBe(false);
+    await repo.removeReaction(item.id, userB);
+    expect(await repo.hasReaction(item.id, userB)).toBe(false);
+  });
+
+  it("allows reactions and reports on public memories but never on private memories", async () => {
+    const repo = await repository();
+    const publicMemory = await repo.createMemory({ title: "Open note", reflection: "A public reflection", category: "growth", visibility: "public-discovery", wallId: "personal" }, userA);
+    const reaction = await repo.createReaction({ memoryId: publicMemory.id }, userB);
+    expect(reaction.memoryId).toBe(publicMemory.id);
+    const report = await repo.createReport({ targetType: "memory", targetId: publicMemory.id, reason: "other" }, userB);
+    expect(report.targetId).toBe(publicMemory.id);
+    const privateMemory = await memory(repo, "Private note");
+    await expect(repo.createReaction({ memoryId: privateMemory.id }, userB)).rejects.toBeInstanceOf(MemoryPermissionError);
+    await expect(repo.createReport({ targetType: "memory", targetId: privateMemory.id, reason: "privacy" }, userB)).rejects.toBeInstanceOf(MemoryPermissionError);
+  });
+
+  it("does not let a non-member react to a selected-community memory", async () => {
+    const store = new InMemoryMemoryStore();
+    store.grantCommunityMembership(userA, "community-a", "A circle");
+    const repo = new MemoryRepository(store);
+    const shared = await repo.createMemory({ title: "Circle note", reflection: "For members", category: "growth", visibility: "selected-community", communityIds: ["community-a"], wallId: "personal" }, userA);
+    await expect(repo.createReaction({ memoryId: shared.id }, userB)).rejects.toBeInstanceOf(MemoryPermissionError);
   });
 });
