@@ -3,10 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { memoryRepository, demoUserId, type MemoryRepository, MemoryPermissionError, MemoryNotFoundError, MemoryValidationError } from "@/server/memory-repository";
-import { createCommentSchema, createReactionSchema, createReportSchema, memoryCategorySchema, memoryImageSchema, reportReasonSchema, type ActivityNotification, type CommunityMembership, type Memory, type MemoryComment, type MemoryReaction, type MemoryReport, type PlacementUpdateInput, type UpdateMemoryInput, type MemoryCategory } from "@/domain/memory";
+import { createCommentSchema, createReactionSchema, createReportSchema, memoryCategorySchema, memoryImageSchema, reportReasonSchema, type ActivityNotification, type CommunityMembership, type Memory, type WallTemplate, type MemoryComment, type MemoryReaction, type MemoryReport, type PlacementUpdateInput, type UpdateMemoryInput, type MemoryCategory } from "@/domain/memory";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string; code: "INVALID" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN" };
 export type WallData = { memories: Memory[]; snapToGrid: boolean };
+export type TemplateApplicationData = { memories: Memory[]; revision: number; template: WallTemplate };
 export type CommunityData = { memories: Memory[]; communities: CommunityMembership[] };
 export type ReactionState = { memoryId: string; reacted: boolean };
 const idSchema = z.string().min(1);
@@ -49,6 +50,18 @@ export async function updateMemoryAction(id: string, input: UpdateMemoryInput): 
 export async function deleteMemoryAction(id: string): Promise<ActionResult<{ id: string }>> {
   try { idSchema.parse(id); await memoryRepository.deleteMemory(id, demoUserId); revalidatePath("/"); return { ok: true, data: { id } }; }
   catch (error) { return failure(error); }
+}
+
+export async function listWallTemplatesAction(): Promise<ActionResult<WallTemplate[]>> {
+  try { return { ok: true, data: await memoryRepository.listWallTemplates() }; } catch (error) { return failure(error); }
+}
+
+export async function applyWallTemplateAction(input: { templateId: string; memoryIds?: string[]; expectedRevision?: number }): Promise<ActionResult<TemplateApplicationData>> {
+  try { const result = await memoryRepository.applyWallTemplate({ ...input, wallId: "personal" }, demoUserId); revalidatePath("/"); return { ok: true, data: result }; } catch (error) { return failure(error); }
+}
+
+export async function undoTemplateApplicationAction(expectedRevision?: number): Promise<ActionResult<{ memories: Memory[]; revision: number }>> {
+  try { const result = await memoryRepository.undoTemplateApplication("personal", demoUserId, expectedRevision); revalidatePath("/"); return { ok: true, data: result }; } catch (error) { return failure(error); }
 }
 
 export async function updatePlacementAction(input: PlacementUpdateInput): Promise<ActionResult<WallData>> {

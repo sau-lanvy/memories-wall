@@ -26,12 +26,16 @@ export type MemoryImage = z.infer<typeof memoryImageSchema>;
 
 export const coordinateSchema = z.object({ x: z.number().finite().min(0).max(100), y: z.number().finite().min(0).max(100) }).strict();
 export type Coordinate = z.infer<typeof coordinateSchema>;
+export const MEMORY_SIZE_PRESETS = ["small", "default", "large"] as const;
+export const memorySizePresetSchema = z.enum(MEMORY_SIZE_PRESETS);
+export type MemorySizePreset = z.infer<typeof memorySizePresetSchema>;
 export const wallPlacementSchema = z.object({
   freeform: coordinateSchema,
   snapped: coordinateSchema,
   rotation: z.number().finite().min(-8).max(8).optional(),
+  sizePreset: memorySizePresetSchema.optional(),
 }).strict();
-export type WallPlacement = z.infer<typeof wallPlacementSchema>;
+export type WallPlacement = Omit<z.infer<typeof wallPlacementSchema>, "sizePreset"> & { sizePreset?: MemorySizePreset };
 
 export const memorySchema = z.object({
   id: z.string().min(1), authorId: z.string().min(1), title: z.string().trim().min(1).max(120),
@@ -76,10 +80,16 @@ export const placementUpdateSchema = z.object({
   mode: z.enum(["freeform", "snapped"]).optional(),
   coordinates: coordinateSchema.optional(),
   rotation: z.number().finite().min(-8).max(8).optional(),
+  sizePreset: memorySizePresetSchema.optional(),
   snapToGrid: z.boolean().optional(),
-}).strict().refine((v) => v.coordinates !== undefined || v.rotation !== undefined || v.snapToGrid !== undefined, "A position, rotation, or snap preference is required");
+}).strict().refine((v) => v.coordinates !== undefined || v.rotation !== undefined || v.sizePreset !== undefined || v.snapToGrid !== undefined, "A position, rotation, or snap preference is required");
 export type PlacementUpdateInput = z.input<typeof placementUpdateSchema>;
 export type PlacementMode = "freeform" | "snapped";
+
+export const templateSlotSchema = z.object({ x: z.number().finite().min(0).max(100), y: z.number().finite().min(0).max(100), rotation: z.number().finite().min(-8).max(8).optional(), lane: z.enum(["now", "next", "later"]) }).strict();
+export type TemplateSlot = z.infer<typeof templateSlotSchema>;
+export const wallTemplateSchema = z.object({ id: z.string().min(1), name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(500), previewAsset: z.string().min(1), version: z.number().int().positive(), published: z.literal(true), slots: z.array(templateSlotSchema).min(1) }).strict();
+export type WallTemplate = z.infer<typeof wallTemplateSchema>;
 
 export const wallDataSchema = z.object({ memories: z.array(memorySchema), snapToGrid: z.boolean() }).strict();
 
