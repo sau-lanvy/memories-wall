@@ -185,6 +185,7 @@ describe("MemoryRepository", () => {
     const result = await repo.getMemory(item.id, userA);
 
     expect(result.images?.[0].url).toMatch(/^https:\/\/storage\.test\/memory\/alice\/.+\?sig=read$/);
+    expect((await repo.getMemoryMediaGallery(item.id, userA))[0].url).toMatch(/^https:\/\/storage\.test\/memory\/alice\/.+\?sig=read$/);
     expect(result.images?.[0].thumbnailUrl).toBeUndefined();
   });
 

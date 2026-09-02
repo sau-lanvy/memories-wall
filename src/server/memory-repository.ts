@@ -5,9 +5,12 @@ import { z } from "zod";
 import { createAzureTableMemoryStore } from "@/server/azure-table-memory-store";
 import { createAzureBlobImageUrlSigner } from "@/server/azure-blob-image-url-signer";
 import { createAzureBlobImageStorage } from "@/server/azure-blob-image-storage";
+import { MemoryMedia, type MemoryImageStorage, type MemoryImageUrlSigner } from "@/server/memory-media";
+import { MemoryNotFoundError, MemoryPermissionError, MemoryValidationError } from "@/server/memory-repository-errors";
+import { WallArrangement } from "@/server/wall-arrangement";
 import {
   activitySchema, commentSchema, coordinateSchema, createCommentSchema, createMemorySchema, createReactionSchema, createReportSchema,
-  listMemoryFiltersSchema, memorySchema, memoryImageSchema, placementUpdateSchema, reportSchema,
+  listMemoryFiltersSchema, memorySchema, placementUpdateSchema, reportSchema,
   reactionSchema, updateMemorySchema, type ActivityNotification, type CommunityMembership, type Coordinate,
   type MemoryComment,
   type CreateCommentInput, type CreateMemoryInput, type CreateReactionInput, type CreateReportInput, type ListMemoryFilters, type Memory,
@@ -15,16 +18,11 @@ import {
 } from "@/domain/memory";
 
 export const DEFAULT_WALL_ID = "personal";
-export class MemoryNotFoundError extends Error { readonly code = "NOT_FOUND" as const; }
-export class MemoryPermissionError extends Error { readonly code = "FORBIDDEN" as const; }
-export class MemoryValidationError extends Error { readonly code = "INVALID" as const; }
+export { MemoryNotFoundError, MemoryPermissionError, MemoryValidationError };
 
 type StoredPreference = { userId: string; wallId: string; snapToGrid: boolean };
 type ImageInput = { mediaType: string; sizeBytes: number; bytes?: Uint8Array };
-export type MemoryImageUrlSigner = { sign(storageKey: string): Promise<string> };
-export type MemoryImageStorage = {
-  upload(storageKey: string, bytes: Uint8Array, mediaType: string): Promise<void>;
-};
+export type { MemoryImageUrlSigner, MemoryImageStorage } from "@/server/memory-media";
 export type CommentPage = { offset?: number; limit?: number };
 const COMMENT_PAGE_SIZE = 20;
 const COMMENT_RATE_WINDOW_MS = 60_000;
@@ -113,41 +111,52 @@ export function defaultCoordinates(index: number): { freeform: Coordinate; snapp
   return { freeform: { x: 7 + ((index * 19) % 77), y: 8 + ((index * 29) % 70) }, snapped: { x: 8 + column * 24, y: 8 + row * 24 }, rotation: (index % 3 - 1) * 1.2, sizePreset: "default" as const };
 }
 
-const WALL_TEMPLATES: WallTemplate[] = [
-  { id: "desk-grid", name: "Desk Grid", description: "A measured arrangement for a clear working wall.", previewAsset: "/templates/template-1.png", backgroundPreset: "linen", version: 1, published: true, slots: Array.from({ length: 6 }, (_, index) => ({ x: 10 + (index % 3) * 34, y: 12 + Math.floor(index / 3) * 42, rotation: (index % 2 ? 1 : -1) * 1.2, lane: (index < 3 ? "now" : "next") as "now" | "next" })) },
-  { id: "scattered-notes", name: "Scattered Notes", description: "A relaxed, overlapping composition for reflective browsing.", previewAsset: "/templates/template-2.png", backgroundPreset: "sage-paper", version: 1, published: true, slots: Array.from({ length: 5 }, (_, index) => ({ x: 12 + (index * 21) % 70, y: 12 + (index * 31) % 68, rotation: (index % 3 - 1) * 2, lane: (index < 2 ? "now" : index < 4 ? "next" : "later") as "now" | "next" | "later" })) },
-  { id: "three-lanes", name: "Three Lanes", description: "A simple Now, Next, and Later rhythm.", previewAsset: "/templates/template-3.png", backgroundPreset: "clay-paper", version: 1, published: true, slots: ["now", "next", "later"].map((lane, index) => ({ x: 16 + index * 34, y: 18, lane: lane as "now" | "next" | "later" })) },
-  { id: "quiet-corners", name: "Quiet Corners", description: "Room to let each reflection breathe.", previewAsset: "/templates/template-4.png", backgroundPreset: "blueprint-paper", version: 1, published: true, slots: [{ x: 12, y: 14, lane: "now" }, { x: 62, y: 16, lane: "next" }, { x: 24, y: 62, lane: "next" }, { x: 74, y: 64, lane: "later" }] },
-  { id: "archive-shelf", name: "Archive Shelf", description: "A dependable row-by-row archive composition.", previewAsset: "/templates/template-5.png", backgroundPreset: "linen", version: 1, published: true, slots: Array.from({ length: 8 }, (_, index) => ({ x: 8 + (index % 4) * 28, y: 15 + Math.floor(index / 4) * 52, lane: (index < 4 ? "now" : "later") as "now" | "later" })) },
-];
-
 export class MemoryRepository {
-  private readonly defaultPresentation = (userId: string, wallId: string): WallPresentation => ({ userId, wallId, revision: 0, backgroundPreset: "neutral-texture" });
   private readonly fallbackMemberships = new Map<string, CommunityMembership[]>();
   private readonly fallbackComments = new Map<string, CommentRecord>();
   private readonly fallbackReports = new Map<string, ReportRecord>();
   private readonly fallbackActivity = new Map<string, ActivityNotification>();
   private readonly fallbackActivityPreferences = new Map<string, boolean>();
   private readonly fallbackReactions = new Map<string, MemoryReaction>();
-  private readonly undoSnapshots = new Map<string, { revision: number; memories: Memory[] }>();
   private readonly commentRateLimits = new Map<string, number[]>();
-  private readonly fallbackPresentations = new Map<string, WallPresentation>();
+  private readonly media: MemoryMedia;
+  private readonly arrangement: WallArrangement;
 
   constructor(
     private readonly store: MemoryStore,
     private readonly imageUrlSigner?: MemoryImageUrlSigner,
     private readonly imageStorage?: MemoryImageStorage,
-  ) {}
+  ) {
+    this.media = new MemoryMedia({
+      getOwnedMemory: (memoryId, userId) => this.getOwnedMemory(memoryId, userId),
+      getReadableMemory: (memoryId, userId) => this.getReadableMemory(memoryId, userId),
+      saveMemory: (memory) => this.store.upsert(memory),
+    }, imageUrlSigner, imageStorage);
+    this.arrangement = new WallArrangement({
+      listVisibleMemories: (userId, wallId) => this.listMemoriesForUser(userId, { wallId }),
+      saveMemory: (memory) => this.store.upsert(memory),
+      decorateMemory: (memory) => this.decorateMemory(memory),
+      defaultCoordinates,
+      getPresentation: async (userId, wallId) => this.store.getWallPresentation ? this.store.getWallPresentation(userId, wallId) : null,
+      savePresentation: async (presentation) => {
+        if (this.store.setWallPresentation) await this.store.setWallPresentation(presentation);
+      },
+    });
+  }
 
   private async decorateMemory(memory: Memory): Promise<Memory> {
-    if (!this.imageUrlSigner || !memory.images?.length) return copy(memory);
-    const signer = this.imageUrlSigner;
-    const images = await Promise.all(memory.images.map(async (image) => ({
-      ...image,
-      url: await signer.sign(image.storageKey),
-      ...(image.thumbnailKey ? { thumbnailUrl: await signer.sign(image.thumbnailKey) } : {}),
-    })));
-    return copy({ ...memory, images });
+    return this.media.decorate(memory);
+  }
+
+  private async getOwnedMemory(memoryId: string, userId: string): Promise<Memory> {
+    return assertOwner(await this.store.get(memoryId), userId);
+  }
+
+  private async getReadableMemory(memoryId: string, userId: string): Promise<Memory> {
+    const memory = await this.store.get(memoryId);
+    if (!memory) throw new MemoryNotFoundError("Memory not found");
+    if (!(await this.canRead(memory, userId))) throw new MemoryPermissionError("You do not have permission to access this memory");
+    return memory;
   }
 
   async createMemory(input: CreateMemoryInput, actorUserId: string): Promise<Memory> {
@@ -195,7 +204,7 @@ export class MemoryRepository {
       if (to && memory.createdAt > to) continue;
       result.push(memory);
     }
-    const sorted = result.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const sorted = result.sort((a, b) => b.createdAt.localeCompare(a.createdAt) || a.id.localeCompare(b.id));
     return Promise.all(sorted.map((memory) => this.decorateMemory(memory)));
   }
 
@@ -380,33 +389,18 @@ export class MemoryRepository {
   }
 
   async attachImage(memoryId: string, input: ImageInput, actorUserId: string): Promise<MemoryImage> {
-    const userId = requireUser(actorUserId);
-    const memory = assertOwner(await this.store.get(memoryId), userId);
-    const parsed = memoryImageSchema.shape.mediaType.safeParse(input.mediaType);
-    const size = z.number().int().positive().max(10_485_760).safeParse(input.sizeBytes);
-    if (!parsed.success || !size.success) throw new MemoryValidationError("Images must be JPG, PNG, or WebP files no larger than 10 MB");
-    if ((memory.images ?? []).length >= 5) throw new MemoryValidationError("A memory can have up to 5 images");
-    if (this.imageStorage && (!input.bytes || input.bytes.byteLength !== size.data)) throw new MemoryValidationError("The image upload was incomplete. Please choose the image again.");
-    const storageKey = `memory/${userId}/${randomUUID()}`;
-    if (this.imageStorage && input.bytes) await this.imageStorage.upload(storageKey, input.bytes, parsed.data);
-    const image = memoryImageSchema.parse({ id: randomUUID(), mediaType: parsed.data, sizeBytes: size.data, storageKey, uploadedAt: new Date().toISOString() });
-    await this.store.upsert(memorySchema.parse({ ...memory, images: [...(memory.images ?? []), image], updatedAt: nextTimestamp(memory.updatedAt) }));
-    return copy(image);
+    return this.media.attach(memoryId, input, requireUser(actorUserId));
   }
 
   async removeImage(memoryId: string, imageId: string, actorUserId: string): Promise<Memory> {
-    const userId = requireUser(actorUserId); const memory = assertOwner(await this.store.get(memoryId), userId);
-    const images = (memory.images ?? []).filter((image) => image.id !== imageId);
-    if (images.length === (memory.images ?? []).length) throw new MemoryNotFoundError("Image not found");
-    const next = memorySchema.parse({ ...memory, images, updatedAt: nextTimestamp(memory.updatedAt) }); await this.store.upsert(next); return copy(next);
+    return this.media.remove(memoryId, imageId, requireUser(actorUserId));
   }
 
   async getMemoryMedia(memoryId: string, actorUserId: string): Promise<MemoryImage | null> {
-    const memory = await this.getMemory(memoryId, actorUserId);
-    return (memory.images ?? [])[0] ? copy((memory.images ?? [])[0]) : null;
+    return this.media.getPrimary(memoryId, requireUser(actorUserId));
   }
   async getMemoryMediaGallery(memoryId: string, actorUserId: string): Promise<MemoryImage[]> {
-    const memory = await this.getMemory(memoryId, actorUserId); return copy(memory.images ?? []);
+    return this.media.getGallery(memoryId, requireUser(actorUserId));
   }
 
   async deleteMemory(id: string, actorUserId: string): Promise<void> {
@@ -418,40 +412,16 @@ export class MemoryRepository {
     return this.store.getPreference(userId, wallId);
   }
 
-  async listWallTemplates(): Promise<WallTemplate[]> { return copy(WALL_TEMPLATES); }
+  async listWallTemplates(): Promise<WallTemplate[]> { return this.arrangement.listTemplates(); }
   async getWallPresentation(wallId: string, actorUserId: string): Promise<WallPresentation> {
-    const userId = requireUser(actorUserId); const key = `${userId}:${wallId}`;
-    const stored = this.store.getWallPresentation ? await this.store.getWallPresentation(userId, wallId) : this.fallbackPresentations.get(key);
-    return copy(stored ?? this.defaultPresentation(userId, wallId));
+    return this.arrangement.getPresentation(wallId, requireUser(actorUserId));
   }
   async getArrangementRevision(wallId: string, actorUserId: string): Promise<number> { return (await this.getWallPresentation(wallId, actorUserId)).revision; }
   async applyWallTemplate(input: { wallId?: string; templateId: string; memoryIds?: string[]; expectedRevision?: number }, actorUserId: string): Promise<{ memories: Memory[]; revision: number; template: WallTemplate; backgroundPreset: WallBackgroundPreset }> {
-    const userId = requireUser(actorUserId); const wallId = input.wallId ?? DEFAULT_WALL_ID; const template = WALL_TEMPLATES.find((item) => item.id === input.templateId);
-    if (!template) throw new MemoryNotFoundError("Wall template not found");
-    const previous = await this.getWallPresentation(wallId, userId); const key = `${userId}:${wallId}`;
-    if (input.expectedRevision !== undefined && input.expectedRevision !== previous.revision) throw new MemoryValidationError("This wall changed elsewhere. Refresh before applying a template.");
-    const visible = await this.listMemoriesForUser(userId, { wallId }); const selected = input.memoryIds ? visible.filter((memory) => input.memoryIds!.includes(memory.id)) : visible;
-    const persistable = (memory: Memory): Memory => memorySchema.parse(memory);
-    const selectedForPersistence = selected.map(persistable);
-    this.undoSnapshots.set(key, { revision: previous.revision, memories: copy(selectedForPersistence) });
-    const arranged = selectedForPersistence.map((memory, index) => { const hasSlot = index < template.slots.length; const slot = template.slots[index % template.slots.length]; const overflowIndex = Math.max(0, index - template.slots.length); const coordinates = hasSlot ? { x: slot.x, y: slot.y } : { x: 8 + (overflowIndex % 4) * 22, y: 10 + Math.floor(overflowIndex / 4) * 22 }; const placement = memory.placements[wallId] ?? defaultCoordinates(index); return memorySchema.parse({ ...memory, placements: { ...memory.placements, [wallId]: { ...placement, freeform: coordinates, snapped: coordinates, rotation: hasSlot ? slot.rotation ?? placement.rotation : 0 } } }); });
-    for (const memory of arranged) await this.store.upsert(memory);
-    const presentation: WallPresentation = { userId, wallId, revision: previous.revision + 1, backgroundPreset: template.backgroundPreset, templateId: template.id, templateVersion: template.version, undo: { memories: copy(selectedForPersistence), backgroundPreset: previous.backgroundPreset, templateId: previous.templateId, templateVersion: previous.templateVersion } };
-    if (this.store.setWallPresentation) await this.store.setWallPresentation(presentation); else this.fallbackPresentations.set(key, copy(presentation));
-    return { memories: await Promise.all(arranged.map((memory) => this.decorateMemory(memory))), revision: presentation.revision, template: copy(template), backgroundPreset: presentation.backgroundPreset };
+    return this.arrangement.apply(input, requireUser(actorUserId));
   }
   async undoTemplateApplication(wallId: string, actorUserId: string, expectedRevision?: number): Promise<{ memories: Memory[]; revision: number; backgroundPreset: WallBackgroundPreset; templateId?: string; templateVersion?: number }> {
-    const userId = requireUser(actorUserId); const key = `${userId}:${wallId}`; const current = await this.getWallPresentation(wallId, userId);
-    if (expectedRevision !== undefined && expectedRevision !== current.revision) throw new MemoryValidationError("This wall changed elsewhere. Refresh before undoing.");
-    if (current.revision < 1 || !current.undo) throw new MemoryNotFoundError("There is no template application to undo.");
-    // Prefer the in-process snapshot, but use the persisted snapshot after a
-    // deployment restart so undo remains a genuinely server-persisted action.
-    const memoriesToRestore = this.undoSnapshots.get(key)?.memories ?? current.undo.memories;
-    for (const memory of memoriesToRestore) await this.store.upsert(memory);
-    const restored: WallPresentation = { userId, wallId, revision: current.revision + 1, backgroundPreset: current.undo.backgroundPreset, templateId: current.undo.templateId, templateVersion: current.undo.templateVersion };
-    if (this.store.setWallPresentation) await this.store.setWallPresentation(restored); else this.fallbackPresentations.set(key, copy(restored));
-    this.undoSnapshots.delete(key);
-    return { memories: await Promise.all(memoriesToRestore.map((memory) => this.decorateMemory(memory))), revision: restored.revision, backgroundPreset: restored.backgroundPreset, templateId: restored.templateId, templateVersion: restored.templateVersion };
+    return this.arrangement.undo(wallId, requireUser(actorUserId), expectedRevision);
   }
 
   async updateCardPlacement(input: PlacementUpdateInput, actorUserId: string): Promise<{ memory: Memory; snapToGrid: boolean }> {
@@ -471,11 +441,7 @@ export class MemoryRepository {
     if (data.coordinates !== undefined || data.rotation !== undefined || data.sizePreset !== undefined) {
       await this.store.upsert(next);
       const presentation = await this.getWallPresentation(wallId, userId);
-      if (presentation.undo) {
-        const retained: WallPresentation = { ...presentation }; delete retained.undo;
-        if (this.store.setWallPresentation) await this.store.setWallPresentation(retained); else this.fallbackPresentations.set(`${userId}:${wallId}`, copy(retained));
-      }
-      this.undoSnapshots.delete(`${userId}:${wallId}`);
+      await this.arrangement.clearUndo(wallId, userId);
     }
     if (data.snapToGrid !== undefined) await this.store.setPreference({ userId, wallId, snapToGrid: nextSnap });
     return { memory: await this.decorateMemory(next), snapToGrid: nextSnap };
