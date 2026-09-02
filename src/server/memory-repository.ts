@@ -4,9 +4,12 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createAzureTableMemoryStore } from "@/server/azure-table-memory-store";
 import {
-  coordinateSchema, createMemorySchema, listMemoryFiltersSchema, memorySchema, placementUpdateSchema,
-  updateMemorySchema, type Coordinate, type CreateMemoryInput, type ListMemoryFilters, type Memory,
-  type PlacementUpdateInput, type UpdateMemoryInput,
+  activitySchema, commentSchema, coordinateSchema, createCommentSchema, createMemorySchema, createReportSchema,
+  listMemoryFiltersSchema, memorySchema, memoryImageSchema, placementUpdateSchema, reportSchema,
+  updateMemorySchema, type ActivityNotification, type CommunityMembership, type Coordinate,
+  type MemoryComment,
+  type CreateCommentInput, type CreateMemoryInput, type CreateReportInput, type ListMemoryFilters, type Memory,
+  type MemoryImage, type PlacementUpdateInput, type UpdateMemoryInput,
 } from "@/domain/memory";
 
 export const DEFAULT_WALL_ID = "personal";
@@ -15,6 +18,10 @@ export class MemoryPermissionError extends Error { readonly code = "FORBIDDEN" a
 export class MemoryValidationError extends Error { readonly code = "INVALID" as const; }
 
 type StoredPreference = { userId: string; wallId: string; snapToGrid: boolean };
+type ImageInput = { mediaType: string; sizeBytes: number };
+type CommentRecord = MemoryComment;
+type ReportRecord = import("@/domain/memory").MemoryReport;
+
 export interface MemoryStore {
   get(id: string): Promise<Memory | null>;
   list(): Promise<Memory[]>;
@@ -22,6 +29,18 @@ export interface MemoryStore {
   delete(id: string): Promise<void>;
   getPreference(userId: string, wallId: string): Promise<boolean>;
   setPreference(preference: StoredPreference): Promise<void>;
+  listCommunityMemberships?(userId: string): Promise<CommunityMembership[]>;
+  setCommunityMembership?(userId: string, membership: CommunityMembership): Promise<void>;
+  getComment?(id: string): Promise<CommentRecord | null>;
+  listComments?(memoryId: string): Promise<CommentRecord[]>;
+  upsertComment?(comment: CommentRecord): Promise<void>;
+  deleteComment?(id: string): Promise<void>;
+  listReports?(): Promise<ReportRecord[]>;
+  upsertReport?(report: ReportRecord): Promise<void>;
+  listActivity?(userId: string): Promise<ActivityNotification[]>;
+  upsertActivity?(activity: ActivityNotification): Promise<void>;
+  getActivityPreference?(userId: string): Promise<boolean>;
+  setActivityPreference?(userId: string, enabled: boolean): Promise<void>;
 }
 
 function copy<T>(value: T): T { return structuredClone(value); }
@@ -36,12 +55,35 @@ function assertOwner(memory: Memory | null, userId: string): Memory {
 export class InMemoryMemoryStore implements MemoryStore {
   private readonly memories = new Map<string, Memory>();
   private readonly preferences = new Map<string, boolean>();
+  private readonly memberships = new Map<string, CommunityMembership[]>();
+  private readonly comments = new Map<string, CommentRecord>();
+  private readonly reports = new Map<string, ReportRecord>();
+  private readonly activity = new Map<string, ActivityNotification>();
+  private readonly activityPreferences = new Map<string, boolean>();
   async get(id: string) { return copy(this.memories.get(id) ?? null); }
   async list() { return copy([...this.memories.values()]); }
   async upsert(memory: Memory) { this.memories.set(memory.id, copy(memory)); }
   async delete(id: string) { this.memories.delete(id); }
   async getPreference(userId: string, wallId: string) { return this.preferences.get(`${userId}:${wallId}`) ?? false; }
   async setPreference(preference: StoredPreference) { this.preferences.set(`${preference.userId}:${preference.wallId}`, preference.snapToGrid); }
+  async listCommunityMemberships(userId: string) { return copy(this.memberships.get(userId) ?? []); }
+  async setCommunityMembership(userId: string, membership: CommunityMembership) {
+    const existing = this.memberships.get(userId) ?? [];
+    this.memberships.set(userId, [...existing.filter((item) => item.communityId !== membership.communityId), copy(membership)]);
+  }
+  grantCommunityMembership(userId: string, communityId: string, name = communityId, canShare = true) {
+    return this.setCommunityMembership(userId, { communityId, name, canShare });
+  }
+  async getComment(id: string) { return copy(this.comments.get(id) ?? null); }
+  async listComments(memoryId: string) { return copy([...this.comments.values()].filter((comment) => comment.memoryId === memoryId)); }
+  async upsertComment(comment: CommentRecord) { this.comments.set(comment.id, copy(comment)); }
+  async deleteComment(id: string) { this.comments.delete(id); }
+  async listReports() { return copy([...this.reports.values()]); }
+  async upsertReport(report: ReportRecord) { this.reports.set(report.id, copy(report)); }
+  async listActivity(userId: string) { return copy([...this.activity.values()].filter((item) => item.userId === userId)); }
+  async upsertActivity(activity: ActivityNotification) { this.activity.set(activity.id, copy(activity)); }
+  async getActivityPreference(userId: string) { return this.activityPreferences.get(userId) ?? true; }
+  async setActivityPreference(userId: string, enabled: boolean) { this.activityPreferences.set(userId, enabled); }
 }
 
 export function defaultCoordinates(index: number): { freeform: Coordinate; snapped: Coordinate; rotation: number } {
@@ -50,6 +92,12 @@ export function defaultCoordinates(index: number): { freeform: Coordinate; snapp
 }
 
 export class MemoryRepository {
+  private readonly fallbackMemberships = new Map<string, CommunityMembership[]>();
+  private readonly fallbackComments = new Map<string, CommentRecord>();
+  private readonly fallbackReports = new Map<string, ReportRecord>();
+  private readonly fallbackActivity = new Map<string, ActivityNotification>();
+  private readonly fallbackActivityPreferences = new Map<string, boolean>();
+
   constructor(private readonly store: MemoryStore) {}
 
   async createMemory(input: CreateMemoryInput, actorUserId: string): Promise<Memory> {
@@ -57,39 +105,183 @@ export class MemoryRepository {
     const parsed = createMemorySchema.safeParse(input);
     if (!parsed.success) throw new MemoryValidationError(parsed.error.issues[0]?.message ?? "Invalid memory");
     const data = parsed.data; const wallId = data.wallId || DEFAULT_WALL_ID;
+    await this.assertCanShare(data.visibility, data.communityIds, userId);
     const existing = await this.store.list();
     const now = new Date().toISOString();
-    const memory = memorySchema.parse({ id: randomUUID(), authorId: userId, title: data.title, reflection: data.reflection, category: data.category, visibility: "private", createdAt: now, updatedAt: now, placements: { [wallId]: defaultCoordinates(existing.length) } });
+    const memory = memorySchema.parse({
+      id: randomUUID(), authorId: userId, title: data.title, reflection: data.reflection, category: data.category,
+      visibility: data.visibility, communityIds: data.visibility === "private" ? [] : data.communityIds,
+      createdAt: now, updatedAt: now, placements: { [wallId]: defaultCoordinates(existing.length) },
+    });
     await this.store.upsert(memory);
     return copy(memory);
   }
 
   async getMemory(id: string, actorUserId: string): Promise<Memory> {
-    const userId = requireUser(actorUserId); return copy(assertOwner(await this.store.get(id), userId));
+    const userId = requireUser(actorUserId);
+    const memory = await this.store.get(id);
+    if (!memory) throw new MemoryNotFoundError("Memory not found");
+    if (!(await this.canRead(memory, userId))) throw new MemoryPermissionError("You do not have permission to access this memory");
+    return copy(memory);
   }
 
   async listMemoriesForUser(actorUserId: string, filters?: ListMemoryFilters): Promise<Memory[]> {
     const userId = requireUser(actorUserId);
-    const parsed = listMemoryFiltersSchema.safeParse({ ...filters, ownership: "owned", wallId: filters?.wallId ?? DEFAULT_WALL_ID });
+    const parsed = listMemoryFiltersSchema.safeParse({ ...filters, wallId: filters?.wallId ?? DEFAULT_WALL_ID });
     if (!parsed.success) throw new MemoryValidationError(parsed.error.issues[0]?.message ?? "Invalid filters");
-    const { category, from, to, wallId } = parsed.data;
-    return (await this.store.list()).filter((memory) => {
-      // The ownership check is deliberately here, before any other filter, for every read.
-      if (memory.authorId !== userId) return false;
-      if (category && memory.category !== category) return false;
-      if (!memory.placements[wallId]) return false;
-      if (from && memory.createdAt < from) return false;
-      if (to && memory.createdAt > to) return false;
-      return true;
-    }).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(copy);
+    const { category, from, to, wallId, ownership, visibility, communityId } = parsed.data;
+    const result: Memory[] = [];
+    for (const memory of await this.store.list()) {
+      const owned = memory.authorId === userId;
+      if (ownership === "owned" && !owned) continue;
+      if (ownership === "shared" && (owned || memory.visibility === "private")) continue;
+      if (ownership !== "owned" && !owned && memory.visibility !== "selected-community") continue;
+      if (!owned && !(await this.canRead(memory, userId))) continue;
+      if (category && memory.category !== category) continue;
+      if (visibility && memory.visibility !== visibility) continue;
+      if (communityId && !memory.communityIds.includes(communityId)) continue;
+      if (!memory.placements[wallId]) continue;
+      if (from && memory.createdAt < from) continue;
+      if (to && memory.createdAt > to) continue;
+      result.push(memory);
+    }
+    return result.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(copy);
   }
 
   async updateMemory(id: string, input: UpdateMemoryInput, actorUserId: string): Promise<Memory> {
     const userId = requireUser(actorUserId); const current = assertOwner(await this.store.get(id), userId);
     const parsed = updateMemorySchema.safeParse(input);
     if (!parsed.success) throw new MemoryValidationError(parsed.error.issues[0]?.message ?? "Invalid memory");
-    const next = memorySchema.parse({ ...current, ...parsed.data, updatedAt: nextTimestamp(current.updatedAt) });
+    const visibility = parsed.data.visibility ?? current.visibility;
+    const communityIds = parsed.data.communityIds ?? current.communityIds;
+    await this.assertCanShare(visibility, communityIds, userId);
+    const next = memorySchema.parse({
+      ...current, ...parsed.data, visibility, communityIds: visibility === "private" ? [] : communityIds,
+      updatedAt: nextTimestamp(current.updatedAt),
+    });
     await this.store.upsert(next); return copy(next);
+  }
+
+  async listCommunityMemoriesForUser(actorUserId: string, communityId?: string): Promise<Memory[]> {
+    const userId = requireUser(actorUserId);
+    const memberships = await this.membershipsFor(userId);
+    const selectedCommunity = communityId ? memberships.some((item) => item.communityId === communityId) : true;
+    if (!selectedCommunity) throw new MemoryPermissionError("You are not a member of this community");
+    return this.listMemoriesForUser(userId, { ownership: "shared", communityId });
+  }
+
+  async listRecentlyAddedMemoriesForUser(actorUserId: string): Promise<Memory[]> {
+    return this.listMemoriesForUser(actorUserId, { ownership: "all" });
+  }
+
+  async listCommunitiesForUser(actorUserId: string): Promise<CommunityMembership[]> {
+    return this.membershipsFor(requireUser(actorUserId));
+  }
+
+  async searchMemoriesForUser(query: string, actorUserId: string, filters?: ListMemoryFilters): Promise<Memory[]> {
+    requireUser(actorUserId);
+    const term = z.string().trim().min(1).max(120).safeParse(query);
+    if (!term.success) throw new MemoryValidationError("A search term is required");
+    const memories = await this.listMemoriesForUser(actorUserId, { ...filters, ownership: filters?.ownership ?? "all" });
+    const needle = term.data.toLocaleLowerCase();
+    return memories.filter((memory) => `${memory.title}\n${memory.reflection}`.toLocaleLowerCase().includes(needle));
+  }
+
+  async createComment(input: CreateCommentInput, actorUserId: string): Promise<MemoryComment> {
+    const userId = requireUser(actorUserId);
+    const parsed = createCommentSchema.safeParse(input);
+    if (!parsed.success) throw new MemoryValidationError(parsed.error.issues[0]?.message ?? "Invalid comment");
+    const memory = await this.store.get(parsed.data.memoryId);
+    if (!memory) throw new MemoryNotFoundError("Memory not found");
+    if (memory.visibility !== "selected-community" || !(await this.canRead(memory, userId))) {
+      throw new MemoryPermissionError("Comments are available on shared memories only");
+    }
+    const comment = commentSchema.parse({ id: randomUUID(), memoryId: memory.id, authorId: userId, body: parsed.data.body, createdAt: new Date().toISOString() });
+    await this.writeComment(comment);
+    if (memory.authorId !== userId && await this.activityEnabled(memory.authorId)) {
+      await this.writeActivity(activitySchema.parse({ id: randomUUID(), userId: memory.authorId, memoryId: memory.id, kind: "comment", createdAt: comment.createdAt }));
+    }
+    return copy(comment);
+  }
+
+  async listComments(memoryId: string, actorUserId: string): Promise<MemoryComment[]> {
+    const memory = await this.store.get(memoryId);
+    if (!memory) throw new MemoryNotFoundError("Memory not found");
+    if (!(await this.canRead(memory, requireUser(actorUserId)))) throw new MemoryPermissionError("You do not have permission to access these comments");
+    return (await this.readComments(memoryId)).filter((comment) => !comment.deletedAt).sort((a, b) => a.createdAt.localeCompare(b.createdAt)).map(copy);
+  }
+
+  async deleteComment(id: string, actorUserId: string): Promise<void> {
+    const userId = requireUser(actorUserId);
+    const comment = await this.readComment(id);
+    if (!comment) throw new MemoryNotFoundError("Comment not found");
+    if (comment.authorId !== userId) throw new MemoryPermissionError("You can only delete your own comments");
+    await this.removeComment(id);
+  }
+
+  async moderateComment(id: string, actorUserId: string): Promise<MemoryComment> {
+    const userId = requireUser(actorUserId);
+    const comment = await this.readComment(id);
+    if (!comment) throw new MemoryNotFoundError("Comment not found");
+    const memory = await this.store.get(comment.memoryId);
+    if (!memory || memory.authorId !== userId) throw new MemoryPermissionError("Only the memory owner can moderate comments");
+    const moderated = commentSchema.parse({ ...comment, deletedAt: new Date().toISOString() });
+    await this.writeComment(moderated);
+    return copy(moderated);
+  }
+
+  async createReport(input: CreateReportInput, actorUserId: string): Promise<ReportRecord> {
+    const userId = requireUser(actorUserId);
+    const parsed = createReportSchema.safeParse(input);
+    if (!parsed.success) throw new MemoryValidationError(parsed.error.issues[0]?.message ?? "Invalid report");
+    const targetMemory = parsed.data.targetType === "memory" ? await this.store.get(parsed.data.targetId) : await this.memoryForComment(parsed.data.targetId);
+    if (!targetMemory) throw new MemoryNotFoundError("Reported content not found");
+    if (!(await this.canRead(targetMemory, userId))) throw new MemoryPermissionError("You do not have permission to report this content");
+    const report = reportSchema.parse({ id: randomUUID(), reporterId: userId, ...parsed.data, createdAt: new Date().toISOString(), status: "open" });
+    await this.writeReport(report);
+    return copy(report);
+  }
+
+  async listModerationQueue(actorUserId: string): Promise<ReportRecord[]> {
+    const userId = requireUser(actorUserId);
+    const reports = await this.readReports();
+    const owned = await this.store.list();
+    const ownedIds = new Set(owned.filter((memory) => memory.authorId === userId).map((memory) => memory.id));
+    const result: ReportRecord[] = [];
+    for (const report of reports) {
+      if (report.targetType === "memory" && ownedIds.has(report.targetId)) result.push(report);
+      if (report.targetType === "comment") {
+        const comment = await this.readComment(report.targetId);
+        if (comment && ownedIds.has(comment.memoryId)) result.push(report);
+      }
+    }
+    return result.map(copy);
+  }
+
+  async getActivity(actorUserId: string): Promise<ActivityNotification[]> {
+    return (await this.readActivity(requireUser(actorUserId))).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(copy);
+  }
+
+  async setActivityPreference(enabled: boolean, actorUserId: string): Promise<void> {
+    const userId = requireUser(actorUserId);
+    if (this.store.setActivityPreference) await this.store.setActivityPreference(userId, enabled);
+    else this.fallbackActivityPreferences.set(userId, enabled);
+  }
+
+  async attachImage(memoryId: string, input: ImageInput, actorUserId: string): Promise<MemoryImage> {
+    const userId = requireUser(actorUserId);
+    const memory = assertOwner(await this.store.get(memoryId), userId);
+    const parsed = memoryImageSchema.shape.mediaType.safeParse(input.mediaType);
+    const size = z.number().int().positive().max(10_485_760).safeParse(input.sizeBytes);
+    if (!parsed.success || !size.success) throw new MemoryValidationError("Images must be JPG, PNG, or WebP files no larger than 10 MB");
+    const image = memoryImageSchema.parse({ id: randomUUID(), mediaType: parsed.data, sizeBytes: size.data, storageKey: `memory/${userId}/${randomUUID()}`, uploadedAt: new Date().toISOString() });
+    await this.store.upsert(memorySchema.parse({ ...memory, image, updatedAt: nextTimestamp(memory.updatedAt) }));
+    return copy(image);
+  }
+
+  async getMemoryMedia(memoryId: string, actorUserId: string): Promise<MemoryImage | null> {
+    const memory = await this.getMemory(memoryId, actorUserId);
+    return memory.image ? copy(memory.image) : null;
   }
 
   async deleteMemory(id: string, actorUserId: string): Promise<void> {
@@ -116,6 +308,78 @@ export class MemoryRepository {
     if (data.coordinates !== undefined || data.rotation !== undefined) await this.store.upsert(next);
     if (data.snapToGrid !== undefined) await this.store.setPreference({ userId, wallId, snapToGrid: nextSnap });
     return { memory: copy(next), snapToGrid: nextSnap };
+  }
+
+  private async membershipsFor(userId: string): Promise<CommunityMembership[]> {
+    if (this.store.listCommunityMemberships) return this.store.listCommunityMemberships(userId);
+    return copy(this.fallbackMemberships.get(userId) ?? []);
+  }
+
+  private async canRead(memory: Memory, userId: string): Promise<boolean> {
+    if (memory.authorId === userId) return true;
+    if (memory.visibility !== "selected-community") return false;
+    const memberships = await this.membershipsFor(userId);
+    return memory.communityIds.some((communityId) => memberships.some((membership) => membership.communityId === communityId));
+  }
+
+  private async assertCanShare(visibility: Memory["visibility"], communityIds: string[], userId: string): Promise<void> {
+    if (visibility === "private") return;
+    if (!communityIds.length) throw new MemoryValidationError("Select at least one community to share this memory");
+    const memberships = await this.membershipsFor(userId);
+    const allowed = new Set(memberships.filter((membership) => membership.canShare).map((membership) => membership.communityId));
+    if (communityIds.some((communityId) => !allowed.has(communityId))) {
+      throw new MemoryPermissionError("You can only share with communities where you have sharing permission");
+    }
+  }
+
+  private async readComment(id: string): Promise<CommentRecord | null> {
+    if (this.store.getComment) return this.store.getComment(id);
+    return copy(this.fallbackComments.get(id) ?? null);
+  }
+
+  private async readComments(memoryId: string): Promise<CommentRecord[]> {
+    if (this.store.listComments) return this.store.listComments(memoryId);
+    return copy([...this.fallbackComments.values()].filter((comment) => comment.memoryId === memoryId));
+  }
+
+  private async writeComment(comment: CommentRecord): Promise<void> {
+    if (this.store.upsertComment) await this.store.upsertComment(comment);
+    else this.fallbackComments.set(comment.id, copy(comment));
+  }
+
+  private async removeComment(id: string): Promise<void> {
+    if (this.store.deleteComment) await this.store.deleteComment(id);
+    else this.fallbackComments.delete(id);
+  }
+
+  private async memoryForComment(id: string): Promise<Memory | null> {
+    const comment = await this.readComment(id);
+    return comment ? this.store.get(comment.memoryId) : null;
+  }
+
+  private async writeReport(report: ReportRecord): Promise<void> {
+    if (this.store.upsertReport) await this.store.upsertReport(report);
+    else this.fallbackReports.set(report.id, copy(report));
+  }
+
+  private async readReports(): Promise<ReportRecord[]> {
+    if (this.store.listReports) return this.store.listReports();
+    return copy([...this.fallbackReports.values()]);
+  }
+
+  private async activityEnabled(userId: string): Promise<boolean> {
+    if (this.store.getActivityPreference) return this.store.getActivityPreference(userId);
+    return this.fallbackActivityPreferences.get(userId) ?? true;
+  }
+
+  private async writeActivity(activity: ActivityNotification): Promise<void> {
+    if (this.store.upsertActivity) await this.store.upsertActivity(activity);
+    else this.fallbackActivity.set(activity.id, copy(activity));
+  }
+
+  private async readActivity(userId: string): Promise<ActivityNotification[]> {
+    if (this.store.listActivity) return this.store.listActivity(userId);
+    return copy([...this.fallbackActivity.values()].filter((item) => item.userId === userId));
   }
 }
 
