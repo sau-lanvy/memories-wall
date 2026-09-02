@@ -38,6 +38,16 @@ export async function signOutAction(): Promise<{ ok: true }> {
   return { ok: true };
 }
 
+export async function signOutEverywhereAction(): Promise<{ ok: true } | { ok: false; error: string }> {
+  const secret = (await cookies()).get(COOKIE_NAME)?.value;
+  if (!secret) return { ok: false, error: "Please sign in to continue." };
+  const { user } = await authService.getSession(secret);
+  await authService.revokeAllSessions(user.id);
+  (await cookies()).set(COOKIE_NAME, "", { ...cookieOptions, maxAge: 0 });
+  revalidatePath("/");
+  return { ok: true };
+}
+
 export async function getCurrentUser() {
   const secret = (await cookies()).get(COOKIE_NAME)?.value;
   if (!secret) return null;

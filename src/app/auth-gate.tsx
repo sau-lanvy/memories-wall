@@ -26,6 +26,11 @@ export function AuthGate() {
         {error && <p role="alert" className="text-sm text-[#9c4f4f]">{error}</p>}
         <button disabled={busy} className="w-full rounded-full bg-[#262421] px-5 py-3 font-medium text-[#f4f1ea]">{busy ? "Please wait…" : requested ? "Enter verification code" : "Continue with email"}</button>
       </form>
+      <div className="mt-8 border-t border-[#e5e1d8] pt-6">
+        <p className="font-archive text-[10px] font-bold uppercase tracking-[.18em] text-[#a49e92]">A quiet preview</p>
+        <p className="mt-2 font-serif-custom text-xl italic">“The light was soft, and I noticed it.”</p>
+        <p className="mt-1 text-xs text-[#7a7469]">The public showcase is synthetic and read-only. Your personal Wall remains private.</p>
+      </div>
       {requested && <button type="button" onClick={() => { setRequested(false); setCode(""); setError(""); }} className="mt-4 text-sm text-[#c16e54] underline">Use a different email</button>}
     </section>
   </main>;

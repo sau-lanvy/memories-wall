@@ -33,6 +33,10 @@ export class AzureTableAuthStore implements AuthStore {
     await this.client.deleteEntity("users", `id:${userId}`).catch((error) => { if (!isStatus(error, 404)) throw error; });
     for (const session of await this.listSessions(userId)) await this.client.deleteEntity("sessions", session.id);
   }
+  async deleteUserEmail(email: string, userId: string) {
+    const user = await this.getUserByEmail(email);
+    if (user?.id === userId) await this.client.deleteEntity("users", email).catch((error) => { if (!isStatus(error, 404)) throw error; });
+  }
   private async getPayload<T>(kind: AuthEntity["kind"], partitionKey: string, rowKey: string): Promise<T | null> {
     try { const entity = await this.client.getEntity<AuthEntity>(partitionKey, rowKey); return entity.kind === kind ? JSON.parse(entity.payload) as T : null; }
     catch (error) { if (isStatus(error, 404)) return null; throw error; }
