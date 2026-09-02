@@ -124,6 +124,7 @@ describe("MemoryRepository", () => {
     await repo.createMemory({ title: "Private light", reflection: "Not for others", category: "growth", visibility: "private", wallId: "personal" }, userA);
 
     expect((await repo.searchMemoriesForUser("LIGHT", userB)).map((entry) => entry.id)).toEqual([shared.id]);
+    expect((await repo.searchMemoriesForUser("LIGHT", userA)).map((entry) => entry.id)).toEqual([shared.id]);
   });
 
   it("validates image metadata and gates media reads by memory visibility", async () => {

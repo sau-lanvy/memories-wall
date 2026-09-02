@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { memoryRepository, demoUserId, type MemoryRepository, MemoryPermissionError, MemoryNotFoundError, MemoryValidationError } from "@/server/memory-repository";
-import { createCommentSchema, createReportSchema, memoryCategorySchema, reportReasonSchema, type ActivityNotification, type CommunityMembership, type Memory, type MemoryComment, type MemoryReport, type PlacementUpdateInput, type UpdateMemoryInput, type MemoryCategory } from "@/domain/memory";
+import { createCommentSchema, createReportSchema, memoryCategorySchema, memoryImageSchema, reportReasonSchema, type ActivityNotification, type CommunityMembership, type Memory, type MemoryComment, type MemoryReport, type PlacementUpdateInput, type UpdateMemoryInput, type MemoryCategory } from "@/domain/memory";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string; code: "INVALID" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN" };
 export type WallData = { memories: Memory[]; snapToGrid: boolean };
@@ -30,8 +30,13 @@ export async function createMemoryAction(formData: FormData): Promise<ActionResu
     const text = (name: string) => { const value = formData.get(name); return typeof value === "string" ? value : ""; };
     const visibility = text("visibility") || "private";
     const communityIds = text("communityIds").split(",").map((value) => value.trim()).filter(Boolean);
+    const photo = formData.get("photo");
+    if (photo instanceof File && photo.size > 0 && (!memoryImageSchema.shape.mediaType.safeParse(photo.type).success || !z.number().int().positive().max(10_485_760).safeParse(photo.size).success)) {
+      throw new MemoryValidationError("Images must be JPG, PNG, or WebP files no larger than 10 MB");
+    }
     const memory = await memoryRepository.createMemory({ title: text("title"), reflection: text("reflection"), category: text("category") as MemoryCategory, visibility: visibility as "private" | "selected-community", communityIds, wallId: "personal" }, demoUserId);
-    revalidatePath("/"); return { ok: true, data: memory };
+    const image = photo instanceof File && photo.size > 0 ? await memoryRepository.attachImage(memory.id, { mediaType: photo.type, sizeBytes: photo.size }, demoUserId) : undefined;
+    revalidatePath("/"); return { ok: true, data: image ? { ...memory, image } : memory };
   } catch (error) { return failure(error); }
 }
 
@@ -55,6 +60,7 @@ export async function updatePlacementAction(input: PlacementUpdateInput): Promis
 
 export async function getCommunityDataAction(communityId?: string): Promise<ActionResult<CommunityData>> {
   try {
+    if (communityId !== undefined) idSchema.parse(communityId);
     const communities = await memoryRepository.listCommunitiesForUser(demoUserId);
     const memories = await memoryRepository.listCommunityMemoriesForUser(demoUserId, communityId);
     return { ok: true, data: { memories, communities } };
@@ -62,7 +68,7 @@ export async function getCommunityDataAction(communityId?: string): Promise<Acti
 }
 
 export async function getAllMemoriesAction(): Promise<ActionResult<Memory[]>> {
-  try { return { ok: true, data: await memoryRepository.listMemoriesForUser(demoUserId, { ownership: "all" }) }; }
+  try { return { ok: true, data: (await memoryRepository.listMemoriesForUser(demoUserId, { ownership: "all" })).filter((memory) => memory.visibility === "selected-community") }; }
   catch (error) { return failure(error); }
 }
 
@@ -77,7 +83,7 @@ export async function searchMemoriesAction(query: string): Promise<ActionResult<
 }
 
 export async function listCommentsAction(memoryId: string): Promise<ActionResult<MemoryComment[]>> {
-  try { return { ok: true, data: await memoryRepository.listComments(memoryId, demoUserId) }; }
+  try { idSchema.parse(memoryId); return { ok: true, data: await memoryRepository.listComments(memoryId, demoUserId) }; }
   catch (error) { return failure(error); }
 }
 
@@ -91,12 +97,12 @@ export async function createCommentAction(input: { memoryId: string; body: strin
 }
 
 export async function deleteCommentAction(id: string): Promise<ActionResult<{ id: string }>> {
-  try { await memoryRepository.deleteComment(id, demoUserId); revalidatePath("/"); return { ok: true, data: { id } }; }
+  try { idSchema.parse(id); await memoryRepository.deleteComment(id, demoUserId); revalidatePath("/"); return { ok: true, data: { id } }; }
   catch (error) { return failure(error); }
 }
 
 export async function moderateCommentAction(id: string): Promise<ActionResult<MemoryComment>> {
-  try { const comment = await memoryRepository.moderateComment(id, demoUserId); revalidatePath("/"); return { ok: true, data: comment }; }
+  try { idSchema.parse(id); const comment = await memoryRepository.moderateComment(id, demoUserId); revalidatePath("/"); return { ok: true, data: comment }; }
   catch (error) { return failure(error); }
 }
 
@@ -108,12 +114,27 @@ export async function createReportAction(input: { targetType: "memory" | "commen
   } catch (error) { return failure(error); }
 }
 
+export async function getModerationQueueAction(): Promise<ActionResult<MemoryReport[]>> {
+  try { return { ok: true, data: await memoryRepository.listModerationQueue(demoUserId) }; }
+  catch (error) { return failure(error); }
+}
+
+export async function attachImageAction(memoryId: string, input: { mediaType: string; sizeBytes: number }): Promise<ActionResult<Memory>> {
+  try {
+    idSchema.parse(memoryId);
+    await memoryRepository.attachImage(memoryId, input, demoUserId);
+    const memory = await memoryRepository.getMemory(memoryId, demoUserId);
+    revalidatePath("/");
+    return { ok: true, data: memory };
+  } catch (error) { return failure(error); }
+}
+
 export async function getActivityAction(): Promise<ActionResult<ActivityNotification[]>> {
   try { return { ok: true, data: await memoryRepository.getActivity(demoUserId) }; }
   catch (error) { return failure(error); }
 }
 
 export async function setActivityPreferenceAction(enabled: boolean): Promise<ActionResult<{ enabled: boolean }>> {
-  try { await memoryRepository.setActivityPreference(enabled, demoUserId); return { ok: true, data: { enabled } }; }
+  try { const parsed = z.boolean().parse(enabled); await memoryRepository.setActivityPreference(parsed, demoUserId); return { ok: true, data: { enabled: parsed } }; }
   catch (error) { return failure(error); }
 }

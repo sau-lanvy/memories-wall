@@ -171,7 +171,7 @@ export class MemoryRepository {
   }
 
   async listRecentlyAddedMemoriesForUser(actorUserId: string): Promise<Memory[]> {
-    return this.listMemoriesForUser(actorUserId, { ownership: "all" });
+    return (await this.listMemoriesForUser(actorUserId, { ownership: "all" })).filter((memory) => memory.visibility === "selected-community");
   }
 
   async listCommunitiesForUser(actorUserId: string): Promise<CommunityMembership[]> {
@@ -182,7 +182,7 @@ export class MemoryRepository {
     requireUser(actorUserId);
     const term = z.string().trim().min(1).max(120).safeParse(query);
     if (!term.success) throw new MemoryValidationError("A search term is required");
-    const memories = await this.listMemoriesForUser(actorUserId, { ...filters, ownership: filters?.ownership ?? "all" });
+    const memories = (await this.listMemoriesForUser(actorUserId, { ...filters, ownership: filters?.ownership ?? "all" })).filter((memory) => memory.visibility === "selected-community");
     const needle = term.data.toLocaleLowerCase();
     return memories.filter((memory) => `${memory.title}\n${memory.reflection}`.toLocaleLowerCase().includes(needle));
   }
