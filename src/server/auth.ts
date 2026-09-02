@@ -142,7 +142,8 @@ class ResendEmailDelivery implements EmailDelivery {
   }
 }
 
-const delivery: EmailDelivery = process.env.NODE_ENV === "production" ? new ResendEmailDelivery() : new CapturingEmailDelivery();
+const hasResendConfiguration = Boolean(process.env.RESEND_API_KEY && process.env.AUTH_EMAIL_FROM);
+const delivery: EmailDelivery = hasResendConfiguration ? new ResendEmailDelivery() : new CapturingEmailDelivery();
 if (process.env.NODE_ENV === "production" && !process.env.AZURE_STORAGE_CONNECTION_STRING) throw new AuthError("Azure authentication storage is not configured.");
 const configuredStore = process.env.AZURE_STORAGE_CONNECTION_STRING
   ? createAzureTableAuthStore(process.env.AZURE_STORAGE_CONNECTION_STRING, process.env.AZURE_AUTH_TABLE_NAME)
