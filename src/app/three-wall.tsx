@@ -38,22 +38,25 @@ function CardMesh({ memory, index, treatment, reducedMotion }: { memory: Memory;
 
 /** Renders the selected template's decorative scene without owning wall interaction. */
 export function ThreeWall({ memories, template }: { memories: Memory[]; template?: WallTemplate }) {
-  if (typeof window !== "undefined" && !("ResizeObserver" in window)) return null;
   const cards = useMemo(() => memories, [memories]);
   const [reducedMotion, setReducedMotion] = useState(false);
+  const [canRender, setCanRender] = useState(false);
   useEffect(() => {
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (!("ResizeObserver" in window)) return;
+    setCanRender(true);
+    const query = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+    if (!query) return;
     const update = () => setReducedMotion(query.matches);
     update();
-    query.addEventListener?.("change", update);
-    return () => query.removeEventListener?.("change", update);
+    if (typeof query.addEventListener === "function") query.addEventListener("change", update);
+    return () => { if (typeof query.removeEventListener === "function") query.removeEventListener("change", update); };
   }, []);
   const treatment = template?.visualTreatment ?? DEFAULT_TREATMENT;
   return <div aria-hidden="true" className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-lg opacity-40 md:block">
-    <Canvas orthographic camera={{ position: [0, 0, 8], zoom: 55 }} fallback={null} dpr={[1, 1.5]}>
+    {canRender && <Canvas orthographic camera={{ position: [0, 0, 8], zoom: 55 }} fallback={null} dpr={[1, 1.5]}>
       <mesh position={[0, 0, -0.2]}><planeGeometry args={[20, 14]} /><meshBasicMaterial color={sceneColors[treatment.scene]} transparent opacity={0.16} /></mesh>
       <ambientLight intensity={1.4} /><directionalLight position={[2, 3, 5]} intensity={1.2} />
       {cards.map((memory, index) => <CardMesh key={memory.id} memory={memory} index={index} treatment={treatment} reducedMotion={reducedMotion} />)}
-    </Canvas>
+    </Canvas>}
   </div>;
 }

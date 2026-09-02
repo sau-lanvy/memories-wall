@@ -8,8 +8,8 @@ vi.mock("@/server/actions", () => ({
   getPublicDiscoveryAction: vi.fn(() => Promise.resolve({ ok: true, data: [] })),
   getReactionAction: vi.fn(() => Promise.resolve({ ok: true, data: { memoryId: "one", reacted: false } })),
   createReactionAction: vi.fn(), removeReactionAction: vi.fn(),
-  listWallTemplatesAction: vi.fn(() => Promise.resolve({ ok: true, data: [] })),
-  applyWallTemplateAction: vi.fn(), undoTemplateApplicationAction: vi.fn(), addMemoryImagesAction: vi.fn(), removeMemoryImageAction: vi.fn(), listCommentsAction: vi.fn(() => Promise.resolve({ ok: true, data: [] })),
+  listWallTemplatesAction: vi.fn(() => Promise.resolve({ ok: true, data: [{ id: "desk-grid", name: "Desk Grid", description: "A clear wall.", previewAsset: "/templates/template-1.png", backgroundPreset: "linen", visualTreatment: { scene: "warm-cabinet", motion: "breathe", intensity: 0.2 }, version: 1, published: true, slots: [{ x: 10, y: 10, lane: "now" }] }] })),
+  applyWallTemplateAction: vi.fn(() => Promise.resolve({ ok: true, data: { memories: base.memories, revision: 1, template: { id: "desk-grid", name: "Desk Grid", description: "A clear wall.", previewAsset: "/templates/template-1.png", backgroundPreset: "linen", visualTreatment: { scene: "warm-cabinet", motion: "breathe", intensity: 0.2 }, version: 1, published: true, slots: [{ x: 10, y: 10, lane: "now" }] }, backgroundPreset: "linen" } })), undoTemplateApplicationAction: vi.fn(), addMemoryImagesAction: vi.fn(), removeMemoryImageAction: vi.fn(), listCommentsAction: vi.fn(() => Promise.resolve({ ok: true, data: [] })),
 }));
 
 const base: WallData = { snapToGrid: false, memories: [{ id: "one", authorId: "demo-user", title: "A good beginning", reflection: "I made space to notice the good thing.", category: "gratitude", visibility: "private", communityIds: [], createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", placements: { personal: { freeform: { x: 10, y: 10 }, snapped: { x: 16, y: 16 } } } }] };
@@ -58,6 +58,15 @@ describe("wall public behavior", () => { beforeEach(() => window.localStorage.cl
     vi.unstubAllGlobals();
   });
   it("offers a separate public discovery surface", () => { render(<WallApp initialData={base} />); expect(screen.getByRole("button", { name: "Public discovery" })).toBeInTheDocument(); });
+  it("lets the user select and apply a wall template from wall settings", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    render(<WallApp initialData={base} />);
+    await user.click(screen.getByRole("button", { name: "Open wall settings" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Wall template" }), "desk-grid");
+    expect(screen.getByRole("dialog", { name: "Desk Grid" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Apply composition" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Desk Grid applied.");
+  });
   it("keeps a queued pointer move safe when the drag ends in the same event batch", async () => {
     const { container } = render(<WallApp initialData={base} />);
     const canvas = screen.getByRole("region", { name: "Memory wall" });
