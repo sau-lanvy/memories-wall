@@ -317,7 +317,8 @@ export class MemoryRepository {
     if (!parsed.success) throw new MemoryValidationError("A memory is required");
     const memory = await this.store.get(parsed.data);
     if (!memory) throw new MemoryNotFoundError("Memory not found");
-    if (!(await this.canReactTo(memory, userId))) throw new MemoryPermissionError("Reactions are available on shared memories only");
+    if (!(await this.canRead(memory, userId))) throw new MemoryPermissionError("You do not have permission to access this memory");
+    if (!(await this.canReactTo(memory, userId))) return false;
     return (await this.readReaction(memory.id, userId)) !== null;
   }
 

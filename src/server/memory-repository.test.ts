@@ -60,6 +60,11 @@ describe("MemoryRepository", () => {
     expect((await repo.getMemory(item.id, userA)).title).toBe("A quiet morning");
   });
 
+  it("returns no reaction for a readable private memory", async () => {
+    const repo = await repository(); const item = await memory(repo);
+    await expect(repo.hasReaction(item.id, userA)).resolves.toBe(false);
+  });
+
   it("keeps freeform and snapped placement histories independent across toggles", async () => {
     const repo = await repository(); const item = await memory(repo);
     await repo.updateCardPlacement({ memoryId: item.id, coordinates: { x: 51, y: 42 } }, userA);
@@ -189,6 +194,20 @@ describe("MemoryRepository", () => {
     expect(result.images?.[0].thumbnailUrl).toBeUndefined();
   });
 
+  it("does not persist decorated image URLs while applying a template", async () => {
+    const signer: MemoryImageUrlSigner = {
+      sign: async (storageKey) => `https://storage.test/${storageKey}?sig=read`,
+    };
+    const store = new InMemoryMemoryStore();
+    const repo = new MemoryRepository(store, signer);
+    const item = await memory(repo);
+    await repo.attachImage(item.id, { mediaType: "image/png", sizeBytes: 1024 }, userA);
+
+    const applied = await repo.applyWallTemplate({ templateId: "desk-grid" }, userA);
+    expect(applied.memories[0].images?.[0].url).toMatch(/^https:\/\/storage\.test\//);
+    expect((await store.get(item.id))?.images?.[0]).not.toHaveProperty("url");
+  });
+
   it("uploads image bytes before persisting image metadata", async () => {
     const uploads: Array<{ key: string; bytes: Uint8Array; mediaType: string }> = [];
     const storage: MemoryImageStorage = {
@@ -291,5 +310,24 @@ describe("MemoryRepository", () => {
     const result = await repo.applyWallTemplate({ templateId: "scattered-notes" }, userA);
     const presentation = await repo.getWallPresentation("personal", userA);
     expect(presentation.templateId).toBe("scattered-notes"); expect(presentation.backgroundPreset).toBe("sage-paper"); expect(result.memories).toEqual([]);
+  });
+
+  it("returns the template visual treatment with an application", async () => {
+    const repo = await repository();
+    const result = await repo.applyWallTemplate({ templateId: "scattered-notes" }, userA);
+    expect(result.template.visualTreatment).toEqual({
+      scene: "paper-drift",
+      motion: "drift",
+      intensity: 0.35,
+    });
+  });
+
+  it("does not resurrect a memory deleted after template application", async () => {
+    const repo = await repository();
+    const item = await memory(repo, "To let go");
+    const applied = await repo.applyWallTemplate({ templateId: "desk-grid" }, userA);
+    await repo.deleteMemory(item.id, userA);
+    await repo.undoTemplateApplication("personal", userA, applied.revision);
+    await expect(repo.getMemory(item.id, userA)).rejects.toThrow("not found");
   });
 });

@@ -11,5 +11,5 @@ export default async function HomePage() {
     memoryRepository.getWallPreference(user.wallId, user.id),
     memoryRepository.getWallPresentation(user.wallId, user.id),
   ]);
-  return <WallApp initialData={{ memories, snapToGrid, backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo) }} />;
+  return <WallApp initialData={{ memories, snapToGrid, userId: user.id, backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo) }} />;
 }

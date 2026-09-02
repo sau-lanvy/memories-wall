@@ -19,6 +19,7 @@ function snapCoordinate(coordinate: Coordinate): Coordinate { return { x: Math.r
 function commentsActionAvailable() { try { return typeof listCommentsAction === "function"; } catch { return false; } }
 
 export function useWallInteraction({ initialData }: { initialData: WallData }) {
+  const ownerId = initialData.userId ?? "demo-user";
   const [data, setData] = useState<WallData>(initialData);
   const [hydrated, setHydrated] = useState(false);
   const [view, setView] = useState<View>("wall");
@@ -58,6 +59,7 @@ export function useWallInteraction({ initialData }: { initialData: WallData }) {
   const [templates, setTemplates] = useState<WallTemplate[]>([]);
   const [templateId, setTemplateId] = useState("");
   const [templateRevision, setTemplateRevision] = useState(initialData.templateRevision ?? 0);
+  const [templateVersion, setTemplateVersion] = useState(initialData.templateVersion);
   const [templatePreview, setTemplatePreview] = useState(false);
   const [backgroundPreset, setBackgroundPreset] = useState(initialData.backgroundPreset ?? "neutral-texture");
   const [activeTemplateId, setActiveTemplateId] = useState(initialData.templateId);
@@ -80,10 +82,10 @@ export function useWallInteraction({ initialData }: { initialData: WallData }) {
 
   const displayedMemories = surfaceMemories ?? data.memories;
   const selected = displayedMemories.find((memory) => memory.id === selectedId) ?? null;
-  const visibleMemories = useMemo(() => displayedMemories.filter((memory) => (category === "all" || memory.category === category) && (ownershipFilter === "all" || ownershipFilter === "mine" ? memory.authorId === "demo-user" : memory.authorId !== "demo-user") && (visibilityFilter === "all" || memory.visibility === visibilityFilter) && (!fromDate || memory.createdAt.slice(0, 10) >= fromDate) && (!toDate || memory.createdAt.slice(0, 10) <= toDate)), [displayedMemories, category, ownershipFilter, visibilityFilter, fromDate, toDate]);
+  const visibleMemories = useMemo(() => displayedMemories.filter((memory) => (category === "all" || memory.category === category) && (ownershipFilter === "all" || ownershipFilter === "mine" ? memory.authorId === ownerId : memory.authorId !== ownerId) && (visibilityFilter === "all" || memory.visibility === visibilityFilter) && (!fromDate || memory.createdAt.slice(0, 10) >= fromDate) && (!toDate || memory.createdAt.slice(0, 10) <= toDate)), [displayedMemories, category, ownershipFilter, visibilityFilter, fromDate, toDate, ownerId]);
   const isEmpty = displayedMemories.length === 0;
   const isOwnedView = view === "wall" || view === "mine";
-  const selectedIsOwned = selected?.authorId === "demo-user";
+  const selectedIsOwned = selected?.authorId === ownerId;
   selectedIdRef.current = selectedId;
 
   useEffect(() => {
@@ -257,19 +259,19 @@ export function useWallInteraction({ initialData }: { initialData: WallData }) {
   }
 
   function applyTemplate() {
-    if (!templateId) return;
+    if (!templateId || !isOwnedView) return;
     setBusy(true); setNotice(null);
-    void applyWallTemplateAction({ templateId, memoryIds: visibleMemories.map((memory) => memory.id), expectedRevision: templateRevision }).then((result) => {
+    void applyWallTemplateAction({ templateId, expectedRevision: templateRevision }).then((result) => {
       if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; }
       setData((current) => ({ ...current, memories: current.memories.map((memory) => result.data.memories.find((item) => item.id === memory.id) ?? memory), backgroundPreset: result.data.backgroundPreset, templateId: result.data.template.id, templateRevision: result.data.revision, canUndoTemplate: true }));
-      setTemplateRevision(result.data.revision); setCanUndoTemplate(true); setBackgroundPreset(result.data.backgroundPreset); setActiveTemplateId(result.data.template.id); setTemplatePreview(false); setNotice({ kind: "success", text: `${result.data.template.name} applied. You can undo this arrangement.` });
+      setTemplateRevision(result.data.revision); setTemplateVersion(result.data.template.version); setCanUndoTemplate(true); setBackgroundPreset(result.data.backgroundPreset); setActiveTemplateId(result.data.template.id); setTemplatePreview(false); setNotice({ kind: "success", text: `${result.data.template.name} applied. You can undo this arrangement.` });
     }).catch(() => setNotice({ kind: "error", text: "The template could not be applied. Please try again." })).finally(() => setBusy(false));
   }
   function undoTemplate() {
     setBusy(true);
     void undoTemplateApplicationAction(templateRevision).then((result) => {
       if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; }
-      setData((current) => ({ ...current, memories: current.memories.map((memory) => result.data.memories.find((item) => item.id === memory.id) ?? memory), backgroundPreset: result.data.backgroundPreset, templateId: result.data.templateId, templateRevision: result.data.revision, canUndoTemplate: false })); setTemplateRevision(result.data.revision); setCanUndoTemplate(false); setBackgroundPreset(result.data.backgroundPreset); setActiveTemplateId(result.data.templateId); setNotice({ kind: "success", text: "Previous arrangement restored." });
+      setData((current) => ({ ...current, memories: current.memories.map((memory) => result.data.memories.find((item) => item.id === memory.id) ?? memory), backgroundPreset: result.data.backgroundPreset, templateId: result.data.templateId, templateRevision: result.data.revision, canUndoTemplate: false })); setTemplateRevision(result.data.revision); setTemplateVersion(result.data.templateVersion); setCanUndoTemplate(false); setBackgroundPreset(result.data.backgroundPreset); setActiveTemplateId(result.data.templateId); setNotice({ kind: "success", text: "Previous arrangement restored." });
     }).catch(() => setNotice({ kind: "error", text: "The arrangement could not be restored. Please try again." })).finally(() => setBusy(false));
   }
 
@@ -332,7 +334,7 @@ export function useWallInteraction({ initialData }: { initialData: WallData }) {
       editing, setEditing, editForm, setEditForm, confirmDelete, setConfirmDelete, notice, setNotice, busy, positionMode,
       setPositionMode, comments, commentDraft, setCommentDraft, commentsBusy, commentsOffset, commentsCanLoadMore, reacted,
       reactionBusy, reportReason, setReportReason, activityEnabled, dragId, templates, templateId, setTemplateId, templateRevision,
-      templatePreview, setTemplatePreview, backgroundPreset, activeTemplateId, canUndoTemplate, sidebarOpen, setSidebarOpen,
+      templatePreview, setTemplatePreview, templateVersion, backgroundPreset, activeTemplateId, canUndoTemplate, sidebarOpen, setSidebarOpen,
       commentsOpen, setCommentsOpen, recentOpen, setRecentOpen,
     },
     actions: {
