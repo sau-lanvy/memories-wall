@@ -19,6 +19,13 @@ function failure(error: unknown): ActionResult<never> {
   return { ok: false, error: error instanceof Error ? error.message : "Something went wrong. Please try again.", code: "UNKNOWN" };
 }
 
+function isUploadedFile(value: FormDataEntryValue): value is File {
+  return typeof value === "object" && value !== null
+    && "arrayBuffer" in value && typeof value.arrayBuffer === "function"
+    && "size" in value && typeof value.size === "number"
+    && "type" in value && typeof value.type === "string";
+}
+
 export async function getWallData(category?: string): Promise<ActionResult<WallData>> {
   try {
     const validCategory = category ? memoryCategorySchema.parse(category) : undefined;
@@ -33,11 +40,11 @@ export async function createMemoryAction(formData: FormData): Promise<ActionResu
     const text = (name: string) => { const value = formData.get(name); return typeof value === "string" ? value : ""; };
     const visibility = text("visibility") || "private";
     const communityIds = text("communityIds").split(",").map((value) => value.trim()).filter(Boolean);
-    const photos = [...formData.getAll("photos"), ...formData.getAll("photo")].filter((value): value is File => value instanceof File && value.size > 0);
+    const photos = [...formData.getAll("photos"), ...formData.getAll("photo")].filter((value): value is File => isUploadedFile(value) && value.size > 0);
     if (photos.length > 5) throw new MemoryValidationError("A memory can have up to 5 images");
     for (const photo of photos) if (!memoryImageSchema.shape.mediaType.safeParse(photo.type).success || !z.number().int().positive().max(10_485_760).safeParse(photo.size).success) throw new MemoryValidationError("Images must be JPG, PNG, or WebP files no larger than 10 MB");
     const memory = await memoryRepository.createMemory({ title: text("title"), reflection: text("reflection"), category: text("category") as MemoryCategory, visibility: visibility as "private" | "selected-community" | "public-discovery", communityIds, wallId: "personal" }, demoUserId);
-    for (const photo of photos) await memoryRepository.attachImage(memory.id, { mediaType: photo.type, sizeBytes: photo.size }, demoUserId);
+    for (const photo of photos) await memoryRepository.attachImage(memory.id, { mediaType: photo.type, sizeBytes: photo.size, bytes: new Uint8Array(await photo.arrayBuffer()) }, demoUserId);
     const saved = photos.length ? await memoryRepository.getMemory(memory.id, demoUserId) : memory;
     revalidatePath("/"); return { ok: true, data: saved };
   } catch (error) { return failure(error); }
@@ -178,14 +185,14 @@ export async function attachImageAction(memoryId: string, input: { mediaType: st
 export async function addMemoryImagesAction(memoryId: string, formData: FormData): Promise<ActionResult<Memory>> {
   try {
     idSchema.parse(memoryId);
-    const photos = formData.getAll("photos").filter((value): value is File => value instanceof File && value.size > 0);
+    const photos = formData.getAll("photos").filter((value): value is File => isUploadedFile(value) && value.size > 0);
     if (!photos.length) throw new MemoryValidationError("Choose at least one image");
     if (photos.length > 5) throw new MemoryValidationError("A memory can have up to 5 images");
     const current = await memoryRepository.getMemory(memoryId, demoUserId);
     if ((current.images ?? []).length + photos.length > 5) throw new MemoryValidationError("A memory can have up to 5 images");
     for (const photo of photos) {
       if (!memoryImageSchema.shape.mediaType.safeParse(photo.type).success || !z.number().int().positive().max(10_485_760).safeParse(photo.size).success) throw new MemoryValidationError("Images must be JPG, PNG, or WebP files no larger than 10 MB");
-      await memoryRepository.attachImage(memoryId, { mediaType: photo.type, sizeBytes: photo.size }, demoUserId);
+      await memoryRepository.attachImage(memoryId, { mediaType: photo.type, sizeBytes: photo.size, bytes: new Uint8Array(await photo.arrayBuffer()) }, demoUserId);
     }
     const memory = await memoryRepository.getMemory(memoryId, demoUserId); revalidatePath("/"); return { ok: true, data: memory };
   } catch (error) { return failure(error); }
