@@ -21,26 +21,30 @@ input, textarea, select { color: var(--ink); }
 @media (min-width: 761px) { .mobile-only { display: none !important; } }
 
 
-/* Reference composition: a paper sidebar and an uninterrupted archive desk. */
-@media (min-width: 761px) {
-  .min-h-screen.wood-grain { display: flex; height: 100vh; min-height: 0; overflow: hidden; background: #13140d; }
-  .min-h-screen.wood-grain > header { display: none; }
-  .min-h-screen.wood-grain > div { display: flex; flex: 1; min-width: 0; max-width: none; margin: 0; }
-  .min-h-screen.wood-grain > div > aside:first-child { position: relative; z-index: 40; display: flex; width: 16rem; min-height: 100vh; flex: 0 0 16rem; flex-direction: column; overflow-y: auto; border-color: #e5e1d8; background: #f4f1ea; color: #3a352d; padding: 1.5rem .75rem; }
-  .min-h-screen.wood-grain > div > aside:first-child::before { content: "Memories\A Wall  •"; white-space: pre; display: block; padding: 0 1.5rem 1rem; color: #3a352d; font-family: var(--font-newsreader), Georgia, serif; font-size: 1.875rem; line-height: 1.05; letter-spacing: -.03em; }
-  .min-h-screen.wood-grain > div > aside:first-child > p { padding-left: 1.5rem; color: #7a7469; }
-  .min-h-screen.wood-grain > div > aside:first-child nav button { color: #5c554a; border-radius: .75rem; }
-  .min-h-screen.wood-grain > div > aside:first-child nav button[aria-current="page"], .min-h-screen.wood-grain > div > aside:first-child nav button:hover { background: #fff; color: #3a352d; }
-  .min-h-screen.wood-grain > div > main { position: relative; flex: 1; min-width: 0; overflow: hidden; background-color: #f2efe7; background-image: linear-gradient(to right, rgba(0,0,0,.02) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,.02) 1px, transparent 1px); background-size: 200px 40px; color: #3a352d; padding: 2rem 2rem 11rem; }
-  .min-h-screen.wood-grain > div > main > :first-child { position: relative; z-index: 30; }
-  .min-h-screen.wood-grain > div > main h2 { color: #3a352d; font-size: 2.25rem; }
-  .min-h-screen.wood-grain > div > main [aria-label="Memory wall"] { min-height: calc(100vh - 12rem); border: 0; border-radius: 0; background: transparent; box-shadow: none; padding: 0; }
-  .min-h-screen.wood-grain > div > main [aria-label="Memory wall"] > .pointer-events-none:first-child { opacity: .03; }
-  .min-h-screen.wood-grain .wall-card { width: min(16rem, 30%); border: 0; border-radius: 0; background-color: #fdfcfa !important; box-shadow: 0 25px 50px -12px rgba(0,0,0,.45), 0 12px 24px -10px rgba(0,0,0,.35), 15px 25px 45px rgba(0,0,0,.25); transform-style: preserve-3d; }
-  .min-h-screen.wood-grain .wall-card:hover, .min-h-screen.wood-grain .wall-card.card-selected { box-shadow: 0 45px 90px -15px rgba(0,0,0,.6), 0 25px 40px -10px rgba(0,0,0,.45), 25px 45px 70px rgba(0,0,0,.35); }
-  .min-h-screen.wood-grain > div > aside:last-child { position: absolute; z-index: 35; top: 6rem; right: 2rem; bottom: 11rem; width: 20rem; overflow-y: auto; border: 1px solid #e5e1d8; border-radius: 1.5rem; background: #fdfcfa; color: #3a352d; box-shadow: 0 25px 50px -12px rgba(0,0,0,.2); }
-  .min-h-screen.wood-grain > div > aside:last-child h2, .min-h-screen.wood-grain > div > aside:last-child h3 { color: #3a352d; }
-  .min-h-screen.wood-grain > div > aside:last-child p, .min-h-screen.wood-grain > div > aside:last-child dd { color: #7a7469; }
-  .min-h-screen.wood-grain > div > main > .mb-4 { position: relative; z-index: 31; }
+/* Paper wall theme: sourced from design/code.html (cream sidebar + textured archive desk). */
+.font-serif-custom { font-family: var(--font-newsreader), Georgia, serif; }
+.bg-textured-wall {
+  background-color: #f2efe7;
+  background-image: linear-gradient(to right, rgba(0,0,0,.02) 1px, transparent 1px), linear-gradient(to bottom, rgba(0,0,0,.02) 1px, transparent 1px);
+  background-size: 200px 40px;
 }
-@media (prefers-reduced-motion: reduce) { .min-h-screen.wood-grain .wall-card { transition: none; } }
+.note-card {
+  background-color: #fdfcfa;
+  box-shadow: 0 25px 50px -12px rgba(0,0,0,.45), 0 12px 24px -10px rgba(0,0,0,.35), 15px 25px 45px rgba(0,0,0,.25);
+  transition: transform .2s ease, box-shadow .2s ease;
+  transform-style: preserve-3d;
+}
+.note-card:hover, .note-card.card-selected {
+  transform: translateY(-2px) scale(1.03) !important;
+  box-shadow: 0 45px 90px -15px rgba(0,0,0,.6), 0 25px 40px -10px rgba(0,0,0,.45), 25px 45px 70px rgba(0,0,0,.35);
+  z-index: 40 !important;
+}
+.note-card.dragging { cursor: grabbing !important; box-shadow: 0 45px 90px -15px rgba(0,0,0,.6), 0 25px 40px -10px rgba(0,0,0,.45), 25px 45px 70px rgba(0,0,0,.35) !important; z-index: 100 !important; }
+.note-pin {
+  width: 16px; height: 16px; border-radius: 50%; position: absolute; top: 12px; left: 50%;
+  box-shadow: 3px 8px 12px rgba(0,0,0,.65), inset 1px 2px 3px rgba(255,255,255,.6);
+}
+.custom-scrollbar::-webkit-scrollbar { width: 6px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background-color: #c5c1b7; border-radius: 10px; }
+@media (prefers-reduced-motion: reduce) { .note-card { transition: none; } }
