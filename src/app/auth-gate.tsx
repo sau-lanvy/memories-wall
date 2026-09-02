@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { requestVerificationCode, verifyVerificationCode } from "@/server/auth-actions";
 
+/** Presents the passwordless Email Address and Verification Challenge flow. */
 export function AuthGate() {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
