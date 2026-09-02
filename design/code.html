@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+
+<html lang="en"><head><link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Promise Wall - Desktop Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com" rel="preconnect"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&amp;display=swap" rel="stylesheet"/>
+<script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: {
+            serif: ['Newsreader', 'serif'],
+            sans: ['ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+          },
+          colors: {
+            surface: {
+              DEFAULT: '#13140d',
+              dim: '#13140d',
+              bright: '#393a32',
+              lowest: '#0d0f08',
+              low: '#1b1c15',
+              container: '#1f2019',
+              high: '#292a23',
+              highest: '#34352d',
+              variant: '#45483d',
+            },
+            on: {
+              surface: '#e3e3dc',
+              variant: '#c5c8ba',
+            },
+            primary: {
+              DEFAULT: '#a3d486',
+              container: '#284f12',
+              on: '#0a3900',
+              onContainer: '#beeaa0',
+            },
+            secondary: {
+              DEFAULT: '#bcccb1',
+              container: '#3c4b37',
+              on: '#263422',
+              onContainer: '#d8e8cc',
+            },
+            outline: {
+              DEFAULT: '#8f9285',
+              variant: '#45483d',
+            },
+            wood: {
+              light: '#f4f1ea',
+              dark: '#e8e4db',
+              shadow: 'rgba(0,0,0,0.1)'
+            }
+          },
+          borderRadius: {
+            '4xl': '2rem',
+          },
+          backgroundImage: {
+            'wood-texture': "url('https://placehold.co/1920x1080/f4f1ea/f4f1ea.png')",
+            'paper-texture': "url('https://placehold.co/400x400/ffffff/ffffff.png')",
+          },
+          boxShadow: {
+            'paper': '0 25px 50px -12px rgba(0, 0, 0, 0.45), 0 12px 24px -10px rgba(0, 0, 0, 0.35), 15px 25px 45px rgba(0,0,0,0.25)',
+            'paper-lifted': '0 45px 90px -15px rgba(0, 0, 0, 0.6), 0 25px 40px -10px rgba(0, 0, 0, 0.45), 25px 45px 70px rgba(0,0,0,0.35)',
+            'pin': '3px 8px 12px rgba(0,0,0,0.65), inset 1px 2px 3px rgba(255,255,255,0.6)',
+          }
+        }
+      }
+    }
+  </script>
+<style data-purpose="base-styles">
+    body {
+      background-color: theme('colors.surface.DEFAULT');
+      color: theme('colors.on.surface');
+      font-family: theme('fontFamily.sans');
+    }
+    .font-serif-custom {
+      font-family: theme('fontFamily.serif');
+    }
+    
+    /* Simulate the textured background for the main area */
+    .bg-textured-wall {
+      background-color: #f2efe7;
+      background-image: linear-gradient(to right, rgba(0,0,0,0.02) 1px, transparent 1px),
+                        linear-gradient(to bottom, rgba(0,0,0,0.02) 1px, transparent 1px);
+      background-size: 200px 40px;
+    }
+    
+    /* Note styling */
+    .note-card {
+      background-color: #fdfcfa;
+      box-shadow: theme('boxShadow.paper');
+      transform: rotate(-1deg) translateZ(0);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      cursor: grab;
+      user-select: none;
+      perspective: 1000px;
+      transform-style: preserve-3d;
+    }
+    .note-card:hover {
+      transform: rotate(0deg) scale(1.02) translateZ(15px);
+      box-shadow: theme('boxShadow.paper-lifted');
+      z-index: 50;
+    }
+    .note-card.dragging {
+      cursor: grabbing !important;
+      transform: rotate(0deg) scale(1.05) translateZ(40px) !important;
+      box-shadow: theme('boxShadow.paper-lifted') !important;
+      z-index: 100 !important;
+      transition: transform 0.05s ease, box-shadow 0.05s ease;
+    }
+    .note-card.dropped {
+      transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.4s ease;
+    }
+    
+    .note-pin {
+      width: 16px;
+      height: 16px;
+      background: radial-gradient(circle at 30% 30%, #a89f91, #5c554a);
+      border-radius: 50%;
+      position: absolute;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%) translateZ(8px);
+      box-shadow: theme('boxShadow.pin');
+    }
+    
+    /* Paper tearing effect simulation */
+    .edge-torn {
+      filter: drop-shadow(0 15px 25px rgba(0,0,0,0.3));
+    }
+    .edge-torn::before, .edge-torn::after {
+      content: '';
+      position: absolute;
+      left: 0; right: 0;
+      height: 4px;
+      background: inherit;
+    }
+    
+    /* Custom Scrollbar for sidebar */
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background-color: theme('colors.surface.variant');
+      border-radius: 10px;
+    }
+
+    #sidebar {
+      transition: transform 0.3s ease-in-out;
+    }
+    #sidebar.collapsed {
+      transform: translateX(-100%);
+    }
+    #sidebar-toggle {
+      transition: transform 0.3s ease-in-out;
+    }
+    #sidebar.collapsed #sidebar-toggle {
+      transform: translateX(100%) rotate(180deg);
+      right: -3rem;
+    }
+  </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex bg-surface-lowest dark">
+<!-- BEGIN: Sidebar Navigation -->
+<aside class="w-64 bg-[#f4f1ea] text-surface-lowest h-full flex flex-col flex-shrink-0 border-r border-[#e5e1d8] relative z-40 transition-all" id="sidebar">
+<div class="p-6">
+<h1 class="font-serif-custom text-3xl font-medium tracking-tight leading-tight text-[#3a352d]">Memories<br/>Wall <span class="text-[#c16e54] text-xl align-top">•</span></h1>
+<p class="mt-4 text-sm text-[#7a7469] font-medium leading-relaxed">Small memories,<br/>lasting change.</p>
+<button class="absolute -right-4 top-10 w-8 h-8 bg-white border border-[#e5e1d8] rounded-full flex items-center justify-center text-[#7a7469] shadow-sm z-50 hover:text-[#c16e54] transition-colors pointer-events-auto" id="sidebar-toggle"><span class="material-symbols-outlined text-lg">chevron_left</span></button></div>
+<nav class="flex-1 overflow-y-auto custom-scrollbar px-3 py-2 space-y-1">
+<!-- Main Nav -->
+<div class="space-y-1 mb-8">
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl bg-white text-[#3a352d] font-medium shadow-sm border border-[#e5e1d8]" href="#">
+<svg class="w-4 h-4 text-[#7a7469]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+          Wall
+          <span class="ml-auto w-1.5 h-1.5 rounded-full bg-[#c16e54]"></span>
+</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-[#7a7469] hover:bg-[#eae6dd] transition-colors font-medium" href="#">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+          Community
+        </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-[#7a7469] hover:bg-[#eae6dd] transition-colors font-medium" href="#"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg> My Memories</a>
+</div>
+<!-- Explore Nav -->
+<div>
+<h3 class="px-3 text-xs font-bold text-[#a49e92] uppercase tracking-wider mb-2">Explore</h3>
+<div class="space-y-0.5">
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-[#5c554a] hover:bg-[#eae6dd] transition-colors font-medium text-sm" href="#"><svg class="w-4 h-4 text-[#8b8478]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4 6h16M4 10h16M4 14h16M4 18h16" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg> All Memories</a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-[#5c554a] hover:bg-[#eae6dd] transition-colors font-medium text-sm" href="#">
+<svg class="w-4 h-4 text-[#8b8478]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Health
+          </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-[#5c554a] hover:bg-[#eae6dd] transition-colors font-medium text-sm" href="#">
+<svg class="w-4 h-4 text-[#8b8478]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Kindness
+          </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-[#5c554a] hover:bg-[#eae6dd] transition-colors font-medium text-sm" href="#">
+<svg class="w-4 h-4 text-[#8b8478]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Learning
+          </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-[#5c554a] hover:bg-[#eae6dd] transition-colors font-medium text-sm" href="#">
+<svg class="w-4 h-4 text-[#8b8478]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Family
+          </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-[#5c554a] hover:bg-[#eae6dd] transition-colors font-medium text-sm" href="#">
+<svg class="w-4 h-4 text-[#8b8478]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Work
+          </a>
+<a class="flex items-center gap-3 px-3 py-2 rounded-xl text-[#5c554a] hover:bg-[#eae6dd] transition-colors font-medium text-sm" href="#">
+<svg class="w-4 h-4 text-[#8b8478]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Self-Growth
+          </a>
+</div>
+</div>
+</nav>
+<div class="p-6 mt-auto">
+<p class="text-[#c16e54] text-xl leading-none mb-2 font-serif-custom">“</p>
+<p class="text-xs text-[#7a7469] font-medium leading-relaxed italic pr-4">The future you is shaped by the memories you keep today.</p>
+</div>
+</aside>
+<!-- END: Sidebar Navigation -->
+<!-- BEGIN: Main Workspace Area -->
+<main class="flex-1 relative flex flex-col bg-textured-wall overflow-hidden text-surface-lowest" id="workspace">
+<!-- Top Header / Actions -->
+<header class="absolute top-0 left-0 right-0 p-8 flex justify-between items-start z-30 pointer-events-none">
+<div class="pointer-events-auto">
+<h2 class="font-serif-custom text-4xl text-[#3a352d] font-medium tracking-tight mb-2">Pin your intention.</h2>
+<p class="text-[#7a7469] font-medium">Place a memory. Read community memories.</p>
+</div>
+<div class="flex items-center gap-4 pointer-events-auto"><div class="flex items-center gap-2 mr-2">
+<span class="text-[10px] font-bold text-[#a49e92] uppercase tracking-widest">Snap</span>
+<button aria-checked="false" class="w-10 h-5 rounded-full bg-[#e5e1d8] relative transition-colors hover:bg-[#d2c4bb] focus:outline-none group active:bg-[#262421]" id="grid-snap-toggle" role="switch">
+<div class="absolute left-0.5 top-0.5 w-4 h-4 bg-white rounded-full shadow-sm transition-transform group-[.active]:translate-x-5"></div>
+</button>
+</div>
+<div class="relative">
+<svg class="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#a49e92]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+<input class="pl-9 pr-12 py-2 bg-white/80 backdrop-blur-sm border border-[#e5e1d8] rounded-full text-sm w-72 focus:outline-none focus:ring-2 focus:ring-[#c16e54]/50 shadow-sm text-[#5c554a] placeholder-[#a49e92]" placeholder="Search memories, people, or tags.." type="text"/>
+<span class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-medium text-[#a49e92] border border-[#e5e1d8] rounded px-1.5 py-0.5 bg-[#f4f1ea]">⌘K</span>
+</div>
+<button class="w-10 h-10 rounded-full bg-white/80 backdrop-blur-sm border border-[#e5e1d8] flex items-center justify-center text-[#7a7469] hover:bg-white shadow-sm transition-colors">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+<button class="w-10 h-10 rounded-full bg-[#826e5e] text-[#f4f1ea] font-serif-custom flex items-center justify-center border-2 border-white shadow-sm">
+          J
+        </button>
+</div>
+</header>
+<!-- Wall Pinned Items Area (Scrollable/Draggable conceptual area) -->
+<div class="flex-1 relative w-full h-full overflow-hidden" id="drag-container">
+<!-- Decorator lines -->
+<div class="absolute inset-0 opacity-[0.03] pointer-events-none" style="background-image: repeating-linear-gradient(0deg, transparent, transparent 199px, #000 199px, #000 200px), repeating-linear-gradient(90deg, transparent, transparent 399px, #000 399px, #000 400px);"></div><div class="absolute inset-0 opacity-0 pointer-events-none transition-opacity duration-300" id="snap-grid-overlay" style="background-image: radial-gradient(#c16e54 0.5px, transparent 0.5px); background-size: 40px 40px;"></div>
+<!-- Pinned Item 1 (Photo) -->
+<div class="absolute top-[10%] left-[25%] note-card p-3 bg-white w-64 rotate-[2deg] z-10 draggable" data-rotation="2">
+<div class="note-pin" style="background: radial-gradient(circle at 35% 35%, #ff4d6d, #b91d1d 70%, #7f1d1d); transform: translateX(-50%) rotate(-3deg);"></div>
+<div class="w-full aspect-square bg-[#a3b899] mb-4 relative overflow-hidden mt-4">
+<!-- Abstract landscape shapes -->
+<div class="absolute inset-0 bg-[#e4e8db]"></div>
+<div class="absolute bottom-0 w-full h-2/3 bg-[#8ba47d]" style="clip-path: polygon(0 40%, 30% 10%, 60% 50%, 100% 20%, 100% 100%, 0 100%);"></div>
+<div class="absolute bottom-0 w-full h-1/2 bg-[#6b855c]" style="clip-path: polygon(0 60%, 40% 30%, 80% 70%, 100% 40%, 100% 100%, 0 100%);"></div>
+<div class="absolute right-8 top-6 w-12 h-12 bg-[#f4ebd0] rounded-full opacity-80"></div>
+<div class="absolute bottom-0 left-1/2 -ml-4 w-8 h-1/2 bg-[#e4e8db] opacity-60" style="clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%);"></div>
+</div>
+</div>
+<!-- Pinned Item 2 (Note) -->
+<div class="absolute top-[25%] left-[12%] note-card w-64 h-64 p-8 flex flex-col justify-center items-center text-center bg-[#f0eef5] rotate-[-3deg] z-20 shadow-md draggable" data-rotation="-3">
+<div class="note-pin" style="background: radial-gradient(circle at 35% 35%, #ff4d6d, #b91d1d 70%, #7f1d1d); transform: translateX(-50%) rotate(5deg);"></div>
+<p class="font-serif-custom text-2xl text-[#9c93a8] leading-tight italic">Say thank you more often.</p>
+<svg class="w-6 h-6 mt-4 text-[#cfc7db] opacity-70" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></path></svg>
+</div>
+<!-- Pinned Item 3 (Note) -->
+<div class="absolute top-[45%] left-[35%] note-card w-56 h-56 p-6 flex flex-col justify-center items-center text-center bg-[#f4ede9] rotate-[1deg] z-10 shadow-md edge-torn draggable" data-rotation="1">
+<div class="note-pin" style="background: radial-gradient(circle at 30% 30%, #ff003c, #8b0000);"></div>
+<p class="font-serif-custom text-xl text-[#9c827b] leading-tight italic">I will choose kindness, every day.</p>
+<svg class="w-4 h-4 mt-6 text-[#d6c7c3]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+<!-- Subtle stitched line decoration -->
+<svg class="absolute top-[60%] left-[30%] w-32 h-32 opacity-20 text-[#a49e92] pointer-events-none" fill="none" stroke="currentColor" stroke-dasharray="2 4" stroke-width="1" viewbox="0 0 100 100">
+<path d="M10,10 Q40,50 90,90"></path>
+<path d="M20,10 Q50,40 80,90"></path>
+</svg>
+<div class="absolute top-[55%] left-[15%] note-card p-3 bg-white w-56 rotate-[-2deg] z-10 shadow-md draggable" data-rotation="-2"><div class="note-pin" style="background: radial-gradient(circle at 35% 35%, #fbbf24, #d97706 70%, #92400e); transform: translateX(-50%) rotate(-2deg);"></div><div class="w-full aspect-square bg-[#f4f1ea] mb-4 relative overflow-hidden mt-4"><img alt="Landscape" class="w-full h-full object-cover opacity-90" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAnRRB98R8zazLIdGDoFtAYm375k5xn7KLvrdCwop11lXY_Y4X00HaseIVW1Xi8ZnzEonyACfKsNveRdhb3WeScdQIOp8OLhsb2-6tnqKPW8DLd5woiMIkUvoOK_mu0DpBHr5x8qOIfreAIELS8u6Y1DHkrrVUcCJRd47zOKHC0E32QQLHwnd_29LA850w5jeSZVBt3BNe5KdgX9-b-SOK0LAu8WfjrG0UDeRtzFoS-2A2x_tsaQ7J5"/></div><p class="text-[10px] font-serif-custom text-[#7a7469] text-center italic">Morning mist, 2024</p></div><div class="absolute top-[15%] left-[45%] note-card w-48 h-48 p-6 flex flex-col justify-center items-center text-center bg-[#f4ebd0] rotate-[2deg] z-10 shadow-sm draggable" data-rotation="2"><div class="note-pin" style="background: radial-gradient(circle at 35% 35%, #34d399, #059669 70%, #064e3b); transform: translateX(-50%) rotate(6deg);"></div><p class="font-serif-custom text-lg text-[#a39774] leading-tight italic">Call Mom on Sunday.</p></div><div class="absolute top-[40%] left-[55%] note-card w-64 h-48 p-6 flex flex-col justify-center items-start bg-white rotate-[-1deg] z-10 shadow-md draggable" data-rotation="-1"><div class="note-pin" style="background: radial-gradient(circle at 35% 35%, #60a5fa, #2563eb 70%, #1e3a8a); transform: translateX(-50%) rotate(-4deg);"></div><p class="text-[10px] font-bold text-[#c16e54] tracking-widest uppercase mb-2">Health</p><p class="font-serif-custom text-xl text-[#3a352d] leading-tight italic">Walk for 30 minutes every morning.</p></div><div class="absolute top-[65%] left-[40%] note-card w-56 h-40 p-6 flex flex-col justify-center items-center text-center bg-[#fdfcfa] rotate-[1.5deg] z-10 shadow-md edge-torn draggable" data-rotation="1.5"><div class="note-pin" style="background: radial-gradient(circle at 30% 30%, #0066ff, #00008b);"></div><p class="font-serif-custom text-lg text-[#5c554a] leading-tight italic">Listen more than I speak.</p></div></div>
+<!-- Right Side Detailed Card Overlay -->
+<div class="absolute right-8 top-24 bottom-32 w-80 bg-[#fdfcfa] rounded-2xl shadow-2xl border border-[#e5e1d8] flex flex-col z-30 overflow-hidden">
+<div class="p-6 flex flex-col overflow-y-auto flex-shrink-0">
+<div class="flex justify-between items-center mb-6">
+<button class="text-[#a49e92] hover:text-[#5c554a] transition-colors">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+<div class="flex items-center text-xs text-[#a49e92] font-medium">
+<svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path><path d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Pinned on Apr 24, 2024
+          </div>
+</div>
+<p class="text-[10px] font-bold text-[#b56e6e] tracking-widest uppercase mb-2">Kindness</p>
+<div class="flex justify-between items-start mb-4">
+<h3 class="font-serif-custom text-3xl text-[#3a352d] leading-tight pr-4">Say thank you more often.</h3>
+<button class="w-8 h-8 rounded-full border border-[#e5e1d8] flex items-center justify-center text-[#c16e54] flex-shrink-0 hover:bg-[#f4f1ea] transition-colors">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+</div>
+<p class="text-[#5c554a] mb-4 text-sm leading-relaxed">Out loud. In writing. In person.</p>
+<div class="flex items-center gap-2 mb-8">
+<span class="w-4 h-[1px] bg-[#a49e92]"></span>
+<span class="text-sm font-serif-custom text-[#7a7469] italic">Ben</span>
+</div>
+<div class="flex items-center gap-6 py-4 border-t border-b border-[#f4f1ea] mb-6">
+<div class="flex items-center gap-1.5 text-sm font-medium text-[#5c554a]">
+<svg class="w-4 h-4 text-[#c16e54]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            115
+          </div>
+<div class="flex items-center gap-1.5 text-sm font-medium text-[#5c554a]">
+<svg class="w-4 h-4 text-[#a49e92]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            47
+          </div>
+<div class="flex items-center gap-1.5 text-sm font-medium text-[#5c554a]">
+<svg class="w-4 h-4 text-[#a49e92]" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            41
+          </div>
+</div>
+<div class="flex gap-3 mb-4 mt-auto">
+<button class="flex-1 py-2.5 rounded-xl border border-[#e5e1d8] flex items-center justify-center gap-2 text-sm font-medium text-[#5c554a] hover:bg-[#f4f1ea] transition-colors">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Support
+          </button>
+<button class="flex-1 py-2.5 rounded-xl border border-[#e5e1d8] flex items-center justify-center gap-2 text-sm font-medium text-[#5c554a] hover:bg-[#f4f1ea] transition-colors">
+<svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+            Reflect
+          </button>
+</div>
+<button class="w-full py-3 rounded-xl bg-[#262421] text-[#f4f1ea] font-medium text-sm flex items-center justify-center gap-2 hover:bg-[#1a1816] transition-colors shadow-sm"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg> Save Memory</button>
+</div>
+<div class="px-6 py-4 border-t border-[#f4f1ea] flex-1 flex flex-col min-h-0"><button class="w-full flex justify-between items-center font-serif-custom text-lg text-[#3a352d] mb-4 group" id="comments-toggle">
+<span>Comments</span>
+<span class="material-symbols-outlined transition-transform duration-300 group-[.collapsed]:-rotate-90">expand_more</span>
+</button>
+<div class="flex-1 flex flex-col min-h-0 transition-all duration-300 overflow-hidden" id="comments-content">
+<div class="flex-1 overflow-y-auto custom-scrollbar space-y-4 pr-2 mb-4">
+<div class="space-y-1">
+<div class="flex justify-between items-center">
+<span class="text-xs font-bold text-[#5c554a]">Sarah M.</span>
+<span class="text-[10px] text-[#a49e92]">2h ago</span>
+</div>
+<p class="text-sm text-[#7a7469] leading-relaxed">This is such a great reminder. I need to do this more.</p>
+</div>
+<div class="space-y-1">
+<div class="flex justify-between items-center">
+<span class="text-xs font-bold text-[#5c554a]">David K.</span>
+<span class="text-[10px] text-[#a49e92]">5h ago</span>
+</div>
+<p class="text-sm text-[#7a7469] leading-relaxed">Gratitude changes everything. Thanks for sharing, Ben!</p>
+</div>
+</div>
+<div class="relative mt-auto">
+<input class="w-full pl-4 pr-10 py-2 bg-[#f4f1ea] border border-[#e5e1d8] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#c16e54]/30 text-[#5c554a] placeholder-[#a49e92] transition-all" placeholder="Add a comment..." type="text"/>
+<button class="absolute right-2 top-1/2 -translate-y-1/2 text-[#c16e54] hover:text-[#a35a44] transition-colors">
+<span class="material-symbols-outlined text-xl">send</span>
+</button>
+</div>
+</div></div><div class="px-6 py-4 border-t border-[#f4f1ea] flex justify-between items-center bg-[#fdfcfa]">
+<button class="flex items-center gap-1.5 text-xs text-[#a49e92] hover:text-[#5c554a] transition-colors font-medium">
+<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+          Report
+        </button>
+<button class="text-[#a49e92] hover:text-[#5c554a] transition-colors">
+<svg class="w-5 h-5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</button>
+</div>
+</div>
+<!-- BEGIN: Footer Actions / Recent -->
+<footer class="absolute bottom-6 left-6 right-6 h-40 bg-[#fbf9f6] rounded-3xl shadow-[0_-4px_20px_rgba(0,0,0,0.05)] border border-[#e5e1d8] flex overflow-hidden z-40">
+<!-- Recently Added Section -->
+<div class="flex-1 p-6 border-r border-[#e5e1d8] flex flex-col">
+<div class="flex justify-between items-center mb-4">
+<h4 class="text-[10px] font-bold text-[#a49e92] uppercase tracking-wider">Recently Added</h4>
+<a class="text-[10px] font-medium text-[#7a7469] flex items-center hover:text-[#3a352d] transition-colors" href="#">
+            View all 
+            <svg class="w-3 h-3 ml-0.5" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M9 5l7 7-7 7" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</a>
+</div>
+<div class="flex gap-3 overflow-x-auto custom-scrollbar pb-2">
+<!-- Card 1 -->
+<div class="w-32 h-24 rounded-xl bg-[#f4ede9] p-3 flex flex-col justify-between flex-shrink-0 border border-[#e8dcd6] relative group cursor-pointer hover:shadow-md transition-shadow">
+<p class="font-serif-custom text-xs text-[#5c554a] leading-snug italic line-clamp-3">I will protect my peace.</p>
+<div class="flex justify-between items-center mt-2">
+<div class="flex items-center gap-1.5">
+<div class="w-3 h-3 rounded-full bg-[#826e5e]"></div>
+<span class="text-[9px] text-[#a49e92]">2m ago</span>
+</div>
+<svg class="w-3 h-3 text-[#a49e92] group-hover:text-[#c16e54] transition-colors" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+</div>
+<!-- Card 2 -->
+<div class="w-32 h-24 rounded-xl bg-[#e5e4f2] p-3 flex flex-col justify-between flex-shrink-0 border border-[#d2cce3] relative group cursor-pointer hover:shadow-md transition-shadow shadow-sm ring-1 ring-black/5">
+<p class="font-serif-custom text-xs text-[#524a66] leading-snug italic line-clamp-3">Say thank you more often.</p>
+<div class="flex justify-between items-center mt-2">
+<div class="flex items-center gap-1.5">
+<div class="w-3 h-3 rounded-full bg-[#a39774]"></div>
+<span class="text-[9px] text-[#8e85a6]">15m ago</span>
+</div>
+<svg class="w-3 h-3 text-[#8e85a6] group-hover:text-[#c16e54] transition-colors" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+</div>
+<!-- Card 3 -->
+<div class="w-32 h-24 rounded-xl bg-[#e1e8dc] p-3 flex flex-col justify-between flex-shrink-0 border border-[#c8d4c0] relative group cursor-pointer hover:shadow-md transition-shadow">
+<p class="font-serif-custom text-xs text-[#4a5444] leading-snug italic line-clamp-3">I will take care of my future self.</p>
+<div class="flex justify-between items-center mt-2">
+<div class="flex items-center gap-1.5">
+<div class="w-3 h-3 rounded-full bg-[#6d5543]"></div>
+<span class="text-[9px] text-[#86967b]">20m ago</span>
+</div>
+<svg class="w-3 h-3 text-[#86967b] group-hover:text-[#c16e54] transition-colors" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+</div>
+<!-- Card 4 -->
+<div class="w-32 h-24 rounded-xl bg-[#edd8d9] p-3 flex flex-col justify-between flex-shrink-0 border border-[#ddc0c2] relative group cursor-pointer hover:shadow-md transition-shadow">
+<p class="font-serif-custom text-xs text-[#6e4e50] leading-snug italic line-clamp-3">Be a reason someone smiles today.</p>
+<div class="flex justify-between items-center mt-2">
+<div class="flex items-center gap-1.5">
+<div class="w-3 h-3 rounded-full bg-[#9c6a53]"></div>
+<span class="text-[9px] text-[#b39597]">1h ago</span>
+</div>
+<svg class="w-3 h-3 text-[#b39597] group-hover:text-[#c16e54] transition-colors" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"></path></svg>
+</div>
+</div>
+</div>
+</div>
+<!-- Start a Promise Section -->
+<div class="w-[450px] p-6 flex flex-col flex-shrink-0 transition-all duration-300">
+<button class="w-full flex justify-between items-center text-[10px] font-bold text-[#a49e92] uppercase tracking-wider mb-4 group" id="start-promise-toggle"><span>Start a Memory</span> <span class="material-symbols-outlined text-sm transition-transform duration-300 group-[.collapsed]:-rotate-90">expand_more</span></button>
+<div class="flex gap-4 h-full transition-all duration-300 overflow-hidden" id="start-promise-content">
+<button class="flex-1 border border-dashed border-[#c5c1b7] rounded-xl flex flex-col items-center justify-center gap-2 text-[#7a7469] hover:bg-white hover:border-[#a49e92] transition-all group"><svg class="w-5 h-5 text-[#a49e92] group-hover:text-[#5c554a] transition-colors" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M12 4v16m8-8H4" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></path></svg> <span class="text-xs font-medium text-center">Write your<br/>own memory</span></button>
+<button class="flex-1 border border-dashed border-[#c5c1b7] rounded-xl flex flex-col items-center justify-center gap-2 text-[#7a7469] hover:bg-white hover:border-[#a49e92] transition-all group">
+<svg class="w-5 h-5 text-[#a49e92] group-hover:text-[#5c554a] transition-colors" fill="none" stroke="currentColor" viewbox="0 0 24 24"><path d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"></path></svg>
+<span class="text-xs font-medium text-center">Use a<br/>template</span>
+</button>
+</div>
+</div>
+</footer>
+<!-- END: Footer Actions / Recent -->
+</main>
+<!-- END: Main Workspace Area -->
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Sidebar Toggle
+      const sidebar = document.getElementById('sidebar');
+      const sidebarToggle = document.getElementById('sidebar-toggle');
+      
+      sidebarToggle.addEventListener('click', () => {
+        sidebar.classList.toggle('collapsed');
+      });
+
+      // Draggable Logic
+      const draggables = document.querySelectorAll('.draggable');
+      const container = document.getElementById('drag-container');
+      
+      let isDragging = false;
+      let currentElement = null;
+      let startX, startY, initialX, initialY;
+      let maxZIndex = 50; // Starting z-index for dragged items above others
+
+      draggables.forEach(draggable => {
+        draggable.addEventListener('mousedown', dragStart);
+      });
+
+      document.addEventListener('mousemove', drag);
+      document.addEventListener('mouseup', dragEnd);
+
+      function dragStart(e) {
+        
+        isDragging = true;
+        currentElement = this;
+        
+        // Remove dropped class if present to cancel drop transition
+        currentElement.classList.remove('dropped');
+        currentElement.classList.add('dragging');
+        
+        // Bring to front
+        maxZIndex++;
+        currentElement.style.zIndex = maxZIndex;
+
+        // Calculate initial offset
+        const rect = currentElement.getBoundingClientRect();
+        const containerRect = container.getBoundingClientRect();
+        
+        // Get current transform translate values or fall back to left/top
+        const style = window.getComputedStyle(currentElement);
+        const matrix = new WebKitCSSMatrix(style.transform);
+        
+        // Use left/top for positioning, transform for rotation/scale
+        initialX = currentElement.offsetLeft;
+        initialY = currentElement.offsetTop;
+        
+        startX = e.clientX;
+        startY = e.clientY;
+
+        e.preventDefault(); // Prevent text selection
+      }
+
+      function drag(e) {
+        if (!isDragging || !currentElement) return;
+
+        const dx = e.clientX - startX;
+        const dy = e.clientY - startY;
+
+        // Update left/top directly
+        currentElement.style.left = `${initialX + dx}px`;
+        currentElement.style.top = `${initialY + dy}px`;
+      }
+
+      function dragEnd() {
+        if (!isDragging || !currentElement) return;
+        
+        isDragging = false;
+        
+        // Add dropped class for transition
+        currentElement.classList.remove('dragging');
+        currentElement.classList.add('dropped');
+        
+        currentElement = null;
+      }
+    });
+  </script>
+<script>
+  (function() {
+    const toggle = document.getElementById('comments-toggle');
+    const content = document.getElementById('comments-content');
+    if (toggle && content) {
+      toggle.addEventListener('click', () => {
+        const isCollapsed = toggle.classList.toggle('collapsed');
+        if (isCollapsed) {
+          content.style.maxHeight = '0px';
+          content.style.opacity = '0';
+          content.style.marginTop = '0px';
+        } else {
+          content.style.maxHeight = '1000px';
+          content.style.opacity = '1';
+          content.style.marginTop = '';
+        }
+      });
+    }
+  })();
+</script><script>
+  (function() {
+    const toggle = document.getElementById('start-promise-toggle');
+    const content = document.getElementById('start-promise-content');
+    const container = toggle?.parentElement;
+    if (toggle && content && container) {
+      toggle.addEventListener('click', () => {
+        const isCollapsed = toggle.classList.toggle('collapsed');
+        if (isCollapsed) {
+          content.style.maxHeight = '0px';
+          content.style.opacity = '0';
+          content.style.marginTop = '0px';
+          container.style.width = 'auto';
+        } else {
+          content.style.maxHeight = '1000px';
+          content.style.opacity = '1';
+          content.style.marginTop = '';
+          container.style.width = '450px';
+        }
+      });
+    }
+  })();
+</script></body></html>
