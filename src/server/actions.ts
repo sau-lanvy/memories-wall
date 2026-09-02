@@ -8,7 +8,7 @@ import { memoryRepository, type MemoryRepository, MemoryPermissionError, MemoryN
 import { createCommentSchema, createReactionSchema, createReportSchema, memoryCategorySchema, memoryImageSchema, reportReasonSchema, type ActivityNotification, type CommunityMembership, type Memory, type WallTemplate, type MemoryComment, type MemoryReaction, type MemoryReport, type PlacementUpdateInput, type UpdateMemoryInput, type MemoryCategory, type WallBackgroundPreset } from "@/domain/memory";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string; code: "INVALID" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN" };
-export type WallData = { memories: Memory[]; snapToGrid: boolean; backgroundPreset?: WallBackgroundPreset; templateId?: string; templateVersion?: number; templateRevision?: number; canUndoTemplate?: boolean };
+export type WallData = { memories: Memory[]; snapToGrid: boolean; userId?: string; backgroundPreset?: WallBackgroundPreset; templateId?: string; templateVersion?: number; templateRevision?: number; canUndoTemplate?: boolean };
 export type TemplateApplicationData = { memories: Memory[]; revision: number; template: WallTemplate; backgroundPreset: WallBackgroundPreset };
 export type CommunityData = { memories: Memory[]; communities: CommunityMembership[] };
 export type ReactionState = { memoryId: string; reacted: boolean };
@@ -42,7 +42,7 @@ export async function getWallData(category?: string): Promise<ActionResult<WallD
     const validCategory = category ? memoryCategorySchema.parse(category) : undefined;
     const memories = await memoryRepository.listMemoriesForUser(userId, { category: validCategory, wallId: "personal" });
     const presentation = await memoryRepository.getWallPresentation("personal", userId);
-    return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", userId), backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo) } };
+    return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", userId), userId, backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo) } };
   } catch (error) { return failure(error); }
 }
 
@@ -90,7 +90,7 @@ export async function updatePlacementAction(input: PlacementUpdateInput): Promis
     await memoryRepository.updateCardPlacement(input, userId);
     const memories = await memoryRepository.listMemoriesForUser(userId, { wallId: "personal" });
     const presentation = await memoryRepository.getWallPresentation("personal", userId);
-    revalidatePath("/"); return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", userId), backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo) } };
+    revalidatePath("/"); return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", userId), userId, backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo) } };
   } catch (error) { return failure(error); }
 }
 

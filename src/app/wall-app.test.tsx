@@ -17,6 +17,12 @@ const base: WallData = { snapToGrid: false, memories: [{ id: "one", authorId: "d
 describe("wall public behavior", () => { beforeEach(() => window.localStorage.clear());
   it("offers one obvious start action for a first visit", () => { render(<WallApp initialData={{ memories: [], snapToGrid: false }} />); expect(screen.getAllByRole("button", { name: "Start a Memory" }).length).toBeGreaterThanOrEqual(1); expect(screen.getByText("Your wall is waiting")).toBeInTheDocument(); });
   it("renders category meaning as accessible text, not color alone", () => { render(<WallApp initialData={base} />); expect(screen.getAllByText("Gratitude").length).toBeGreaterThan(0); expect(screen.getByRole("button", { name: "A good beginning, Gratitude memory" })).toBeInTheDocument(); expect(screen.queryByText("My archive")).not.toBeInTheDocument(); expect(screen.queryByText("Everything you have kept")).not.toBeInTheDocument(); });
+  it("recognizes memories owned by the authenticated user", async () => {
+    const authenticatedMemory = { ...base.memories[0], authorId: "authenticated-user" };
+    render(<WallApp initialData={{ ...base, userId: "authenticated-user", memories: [authenticatedMemory] }} />);
+    fireEvent.click(screen.getByRole("button", { name: "A good beginning, Gratitude memory" }));
+    expect(screen.getByRole("button", { name: "Edit memory" })).toBeInTheDocument();
+  });
   it("places the active category description inside the wall", async () => {
     const user = (await import("@testing-library/user-event")).default.setup();
     render(<WallApp initialData={base} />);

@@ -98,7 +98,13 @@ export type PlacementMode = "freeform" | "snapped";
 
 export const templateSlotSchema = z.object({ x: z.number().finite().min(0).max(100), y: z.number().finite().min(0).max(100), rotation: z.number().finite().min(-8).max(8).optional(), lane: z.enum(["now", "next", "later"]) }).strict();
 export type TemplateSlot = z.infer<typeof templateSlotSchema>;
-export const wallTemplateSchema = z.object({ id: z.string().min(1), name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(500), previewAsset: z.string().min(1), version: z.number().int().positive(), published: z.literal(true), backgroundPreset: z.enum(["neutral-texture", "linen", "sage-paper", "clay-paper", "blueprint-paper"]).default("neutral-texture"), slots: z.array(templateSlotSchema).min(1) }).strict();
+export const templateVisualTreatmentSchema = z.object({
+  scene: z.enum(["paper-drift", "warm-cabinet", "soft-constellation", "botanical-light", "blueprint-glow"]),
+  motion: z.enum(["still", "breathe", "float", "drift", "constellation"]),
+  intensity: z.number().finite().min(0).max(1),
+}).strict();
+export type TemplateVisualTreatment = z.infer<typeof templateVisualTreatmentSchema>;
+export const wallTemplateSchema = z.object({ id: z.string().min(1), name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(500), previewAsset: z.string().min(1), version: z.number().int().positive(), published: z.literal(true), backgroundPreset: z.enum(["neutral-texture", "linen", "sage-paper", "clay-paper", "blueprint-paper"]).default("neutral-texture"), visualTreatment: templateVisualTreatmentSchema, slots: z.array(templateSlotSchema).min(1) }).strict();
 export type WallTemplate = z.infer<typeof wallTemplateSchema>;
 
 export const WALL_BACKGROUND_PRESETS = ["neutral-texture", "linen", "sage-paper", "clay-paper", "blueprint-paper"] as const;

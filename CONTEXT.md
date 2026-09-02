@@ -23,16 +23,32 @@ _Avoid_: Sort order, feed order
 ## Wall templates
 
 **Wall Template**:
-A published, system-managed preset that arranges the currently visible and authorized memories on a wall. It is presentation data, not memory content.
+A published, system-managed preset that defines a wall's visual treatment and arranges the currently visible and authorized memories. Its visual treatment includes the background, atmosphere, card treatment, and motion behavior; it is presentation data, not memory content.
 _Avoid_: Memory template, card template
+
+**Template Visual Treatment**:
+The background, atmosphere, depth, card styling, and animation rules published as part of a Wall Template.
+_Avoid_: Theme, decoration, effect preset
+
+**Template Motion Style**:
+A bounded named motion behavior, such as still, breathe, float, drift, or constellation, that controls ambient movement and transitions in a Wall Template.
+_Avoid_: Animation config, Three.js effect, motion parameter
 
 **Presentation Lane**:
 A visual region such as Now, Next, or Later used to organize an arrangement without adding a corresponding concept to the memory.
 _Avoid_: Memory state, memory category
 
 **Template Application**:
-An explicit user action that applies a selected wall template to the current arrangement and creates a reversible arrangement change.
+An explicit, previewed user action that applies a selected wall template's visual treatment and slot arrangement to the current authorized memory set. It creates a reversible arrangement change while retaining the applied template version.
 _Avoid_: Template selection, automatic reflow
+
+**Applied Template Version**:
+The specific published version of a Wall Template retained by a Wall after application, so its presentation remains stable until the user chooses another version.
+_Avoid_: Latest template, live theme
+
+**Wall Presentation**:
+The saved visual treatment and applied template version for a Wall, distinct from the Memories and their Arrangement.
+_Avoid_: Wall content, display settings
 
 ## Identity and access
 
