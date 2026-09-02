@@ -9,7 +9,7 @@ import {
   reactionSchema, updateMemorySchema, type ActivityNotification, type CommunityMembership, type Coordinate,
   type MemoryComment,
   type CreateCommentInput, type CreateMemoryInput, type CreateReactionInput, type CreateReportInput, type ListMemoryFilters, type Memory,
-  type MemoryImage, type MemoryReaction, type PlacementUpdateInput, type UpdateMemoryInput,
+  type MemoryImage, type MemoryReaction, type MemorySizePreset, type WallTemplate, type PlacementUpdateInput, type UpdateMemoryInput,
 } from "@/domain/memory";
 
 export const DEFAULT_WALL_ID = "personal";
@@ -93,10 +93,18 @@ export class InMemoryMemoryStore implements MemoryStore {
   async deleteReaction(memoryId: string, userId: string) { this.reactions.delete(`${memoryId}:${userId}`); }
 }
 
-export function defaultCoordinates(index: number): { freeform: Coordinate; snapped: Coordinate; rotation: number } {
+export function defaultCoordinates(index: number): { freeform: Coordinate; snapped: Coordinate; rotation: number; sizePreset?: MemorySizePreset } {
   const column = index % 4; const row = Math.floor(index / 4);
-  return { freeform: { x: 7 + ((index * 19) % 77), y: 8 + ((index * 29) % 70) }, snapped: { x: 8 + column * 24, y: 8 + row * 24 }, rotation: (index % 3 - 1) * 1.2 };
+  return { freeform: { x: 7 + ((index * 19) % 77), y: 8 + ((index * 29) % 70) }, snapped: { x: 8 + column * 24, y: 8 + row * 24 }, rotation: (index % 3 - 1) * 1.2, sizePreset: "default" as const };
 }
+
+const WALL_TEMPLATES: WallTemplate[] = [
+  { id: "desk-grid", name: "Desk Grid", description: "A measured arrangement for a clear working wall.", previewAsset: "/templates/template-1.png", version: 1, published: true, slots: Array.from({ length: 6 }, (_, index) => ({ x: 10 + (index % 3) * 34, y: 12 + Math.floor(index / 3) * 42, rotation: (index % 2 ? 1 : -1) * 1.2, lane: (index < 3 ? "now" : "next") as "now" | "next" })) },
+  { id: "scattered-notes", name: "Scattered Notes", description: "A relaxed, overlapping composition for reflective browsing.", previewAsset: "/templates/template-2.png", version: 1, published: true, slots: Array.from({ length: 5 }, (_, index) => ({ x: 12 + (index * 21) % 70, y: 12 + (index * 31) % 68, rotation: (index % 3 - 1) * 2, lane: (index < 2 ? "now" : index < 4 ? "next" : "later") as "now" | "next" | "later" })) },
+  { id: "three-lanes", name: "Three Lanes", description: "A simple Now, Next, and Later rhythm.", previewAsset: "/templates/template-3.png", version: 1, published: true, slots: ["now", "next", "later"].map((lane, index) => ({ x: 16 + index * 34, y: 18, lane: lane as "now" | "next" | "later" })) },
+  { id: "quiet-corners", name: "Quiet Corners", description: "Room to let each reflection breathe.", previewAsset: "/templates/template-4.png", version: 1, published: true, slots: [{ x: 12, y: 14, lane: "now" }, { x: 62, y: 16, lane: "next" }, { x: 24, y: 62, lane: "next" }, { x: 74, y: 64, lane: "later" }] },
+  { id: "archive-shelf", name: "Archive Shelf", description: "A dependable row-by-row archive composition.", previewAsset: "/templates/template-5.png", version: 1, published: true, slots: Array.from({ length: 8 }, (_, index) => ({ x: 8 + (index % 4) * 28, y: 15 + Math.floor(index / 4) * 52, lane: (index < 4 ? "now" : "later") as "now" | "later" })) },
+];
 
 export class MemoryRepository {
   private readonly fallbackMemberships = new Map<string, CommunityMembership[]>();
@@ -105,6 +113,8 @@ export class MemoryRepository {
   private readonly fallbackActivity = new Map<string, ActivityNotification>();
   private readonly fallbackActivityPreferences = new Map<string, boolean>();
   private readonly fallbackReactions = new Map<string, MemoryReaction>();
+  private readonly arrangementRevisions = new Map<string, number>();
+  private readonly undoSnapshots = new Map<string, { revision: number; memories: Memory[] }>();
 
   constructor(private readonly store: MemoryStore) {}
 
@@ -353,19 +363,39 @@ export class MemoryRepository {
     return this.store.getPreference(userId, wallId);
   }
 
+  async listWallTemplates(): Promise<WallTemplate[]> { return copy(WALL_TEMPLATES); }
+  async getArrangementRevision(wallId: string, actorUserId: string): Promise<number> { requireUser(actorUserId); return this.arrangementRevisions.get(`${actorUserId}:${wallId}`) ?? 0; }
+  async applyWallTemplate(input: { wallId?: string; templateId: string; memoryIds?: string[]; expectedRevision?: number }, actorUserId: string): Promise<{ memories: Memory[]; revision: number; template: WallTemplate }> {
+    const userId = requireUser(actorUserId); const wallId = input.wallId ?? DEFAULT_WALL_ID; const template = WALL_TEMPLATES.find((item) => item.id === input.templateId);
+    if (!template) throw new MemoryNotFoundError("Wall template not found"); const key = `${userId}:${wallId}`; const revision = this.arrangementRevisions.get(key) ?? 0;
+    if (input.expectedRevision !== undefined && input.expectedRevision !== revision) throw new MemoryValidationError("This wall changed elsewhere. Refresh before applying a template.");
+    const visible = await this.listMemoriesForUser(userId, { wallId }); const selected = input.memoryIds ? visible.filter((memory) => input.memoryIds!.includes(memory.id)) : visible;
+    this.undoSnapshots.set(key, { revision, memories: copy(selected) });
+    const arranged = selected.map((memory, index) => { const slot = template.slots[index % template.slots.length]; const wraps = Math.floor(index / template.slots.length); const coordinates = { x: Math.min(96, slot.x + wraps * 3), y: Math.min(96, slot.y + wraps * 4) }; const placement = memory.placements[wallId] ?? defaultCoordinates(index); return memorySchema.parse({ ...memory, placements: { ...memory.placements, [wallId]: { ...placement, freeform: coordinates, snapped: coordinates, rotation: slot.rotation ?? placement.rotation } } }); });
+    for (const memory of arranged) await this.store.upsert(memory); const nextRevision = revision + 1; this.arrangementRevisions.set(key, nextRevision); return { memories: copy(arranged), revision: nextRevision, template: copy(template) };
+  }
+  async undoTemplateApplication(wallId: string, actorUserId: string, expectedRevision?: number): Promise<{ memories: Memory[]; revision: number }> {
+    const userId = requireUser(actorUserId); const key = `${userId}:${wallId}`; const revision = this.arrangementRevisions.get(key) ?? 0;
+    if (expectedRevision !== undefined && expectedRevision !== revision) throw new MemoryValidationError("This wall changed elsewhere. Refresh before undoing."); const snapshot = this.undoSnapshots.get(key);
+    if (!snapshot || snapshot.revision + 1 !== revision) throw new MemoryNotFoundError("There is no template application to undo."); for (const memory of snapshot.memories) await this.store.upsert(memory);
+    this.undoSnapshots.delete(key); this.arrangementRevisions.set(key, revision + 1); return { memories: copy(snapshot.memories), revision: revision + 1 };
+  }
+
   async updateCardPlacement(input: PlacementUpdateInput, actorUserId: string): Promise<{ memory: Memory; snapToGrid: boolean }> {
     const userId = requireUser(actorUserId); const parsed = placementUpdateSchema.safeParse(input);
     if (!parsed.success) throw new MemoryValidationError(parsed.error.issues[0]?.message ?? "Invalid placement");
     const data = parsed.data; const current = assertOwner(await this.store.get(data.memoryId), userId); const wallId = data.wallId || DEFAULT_WALL_ID;
     const existing = current.placements[wallId] ?? defaultCoordinates((await this.store.list()).length);
+    const normalizedExisting = { ...existing, sizePreset: existing.sizePreset ?? "default" as const };
     const currentSnap = await this.store.getPreference(userId, wallId);
     const nextSnap = data.snapToGrid ?? currentSnap;
     const mode = data.mode ?? ((data.snapToGrid ?? currentSnap) ? "snapped" : "freeform");
-    const placements = { ...current.placements, [wallId]: { ...existing } };
+    const placements = { ...current.placements, [wallId]: normalizedExisting };
     if (data.coordinates) placements[wallId] = { ...placements[wallId], [mode]: coordinateSchema.parse(data.coordinates) };
     if (data.rotation !== undefined) placements[wallId] = { ...placements[wallId], rotation: data.rotation };
+    if (data.sizePreset !== undefined) placements[wallId] = { ...placements[wallId], sizePreset: data.sizePreset };
     const next = memorySchema.parse({ ...current, placements, updatedAt: nextTimestamp(current.updatedAt) });
-    if (data.coordinates !== undefined || data.rotation !== undefined) await this.store.upsert(next);
+    if (data.coordinates !== undefined || data.rotation !== undefined || data.sizePreset !== undefined) await this.store.upsert(next);
     if (data.snapToGrid !== undefined) await this.store.setPreference({ userId, wallId, snapToGrid: nextSnap });
     return { memory: copy(next), snapToGrid: nextSnap };
   }

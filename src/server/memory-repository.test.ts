@@ -7,6 +7,26 @@ async function repository() { return new MemoryRepository(new InMemoryMemoryStor
 async function memory(repo: MemoryRepository, title = "A quiet morning") { return repo.createMemory({ title, reflection: "The light was soft and I noticed it.", category: "gratitude", visibility: "private", wallId: "personal" }, userA); }
 
 describe("MemoryRepository", () => {
+  it("applies published templates deterministically and preserves size and image metadata", async () => {
+    const repo = await repository(); const first = await memory(repo, "First"); const second = await memory(repo, "Second");
+    await repo.updateCardPlacement({ memoryId: first.id, sizePreset: "large" }, userA);
+    const applied = await repo.applyWallTemplate({ templateId: "three-lanes" }, userA);
+    expect(applied.memories.map((item) => item.id)).toEqual([second.id, first.id]);
+    expect(applied.memories[1].placements.personal.sizePreset).toBe("large");
+    expect(applied.revision).toBe(1);
+  });
+
+  it("rejects stale template applications and supports one-step undo", async () => {
+    const repo = await repository(); const item = await memory(repo);
+    const applied = await repo.applyWallTemplate({ templateId: "desk-grid", expectedRevision: 0 }, userA);
+    await expect(repo.applyWallTemplate({ templateId: "three-lanes", expectedRevision: 0 }, userA)).rejects.toThrow("changed elsewhere");
+    const undone = await repo.undoTemplateApplication("personal", userA, applied.revision);
+    expect(undone.revision).toBe(2);
+    await expect(repo.undoTemplateApplication("personal", userA, undone.revision)).rejects.toThrow("no template application");
+    expect((await repo.getMemory(item.id, userA)).placements.personal.freeform).toEqual({ x: 7, y: 8 });
+  });
+
+
   it("creates complete memories with both placement coordinate sets", async () => {
     const repo = await repository(); const result = await memory(repo);
     expect(result.authorId).toBe(userA); expect(result.visibility).toBe("private");
@@ -60,6 +80,13 @@ describe("MemoryRepository", () => {
     const unchanged = await repo.getMemory(item.id, userA);
     expect(unchanged.updatedAt).toBe(item.updatedAt);
     expect(await repo.getWallPreference("personal", userA)).toBe(true);
+  });
+
+  it("persists independent card size presets", async () => {
+    const repo = await repository(); const item = await memory(repo);
+    const result = await repo.updateCardPlacement({ memoryId: item.id, sizePreset: "large" }, userA);
+    expect(result.memory.placements.personal.sizePreset).toBe("large");
+    expect((await repo.getMemory(item.id, userA)).placements.personal.sizePreset).toBe("large");
   });
 
   it("validates unsafe input at the repository boundary", async () => {

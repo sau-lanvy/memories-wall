@@ -8,6 +8,8 @@ vi.mock("@/server/actions", () => ({
   getPublicDiscoveryAction: vi.fn(() => Promise.resolve({ ok: true, data: [] })),
   getReactionAction: vi.fn(() => Promise.resolve({ ok: true, data: { memoryId: "one", reacted: false } })),
   createReactionAction: vi.fn(), removeReactionAction: vi.fn(),
+  listWallTemplatesAction: vi.fn(() => Promise.resolve({ ok: true, data: [] })),
+  applyWallTemplateAction: vi.fn(), undoTemplateApplicationAction: vi.fn(),
 }));
 
 const base: WallData = { snapToGrid: false, memories: [{ id: "one", authorId: "demo-user", title: "A good beginning", reflection: "I made space to notice the good thing.", category: "gratitude", visibility: "private", communityIds: [], createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", placements: { personal: { freeform: { x: 10, y: 10 }, snapped: { x: 16, y: 16 } } } }] };

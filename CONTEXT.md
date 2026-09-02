@@ -1,74 +1,53 @@
-## Project Context
+# Memories Wall Domain
 
-- Latest Next.js 16+ (App Router)
-- Latest React 19+ for modern web development
-- TypeScript for type safety
-- Tailwind CSS 4+ for styling
-- Zod for runtime type validation
-- Three.js for 3D rendering
-- React Three Fiber for 3D rendering
-- Azure Blob Storage for media storage
-- Azure Table Storage for data storage
-- Azure Container Apps for hosting
-- Azure for deployment
+This context defines the language for a personal, spatial archive of reflections and memories.
 
-## Development Standards
+## Memory and wall
 
-### Architecture
-- App Router with server and client components
-- Group routes by feature/domain
-- Implement proper error boundaries
-- Use React Server Components by default
-- Leverage static optimization where possible
+**Memory**:
+A saved reflection owned by a user, with a title, reflection text, category, visibility, timestamps, and optional attached image.
+_Avoid_: Note, post, entry
 
-### TypeScript
-- Strict mode enabled
-- Clear type definitions
-- Proper error handling with type guards
-- Zod for runtime type validation
+**Wall**:
+A user's personal space where authorized memories are arranged for viewing and revisiting. Phase 1 has one personal wall per user.
+_Avoid_: Feed, dashboard
 
-### UI/UX
-- Always use the /frontend-design skill for design decisions.
+**Placement**:
+A memory's position and orientation on a wall, including its freeform or snapped coordinates and its user-selected size.
+_Avoid_: Layout, location
 
-### Styling
-- Tailwind CSS with consistent color palette
-- Responsive design patterns
-- Dark mode support
-- Follow container queries best practices
-- Maintain semantic HTML structure
+**Arrangement**:
+The set of placements that determines how memories appear together on a wall. An arrangement can be manually curated or produced by a wall template.
+_Avoid_: Sort order, feed order
 
-### State Management
-- React Server Components for server state
-- React hooks for client state
-- Proper loading and error states
-- Optimistic updates where appropriate
+## Wall templates
 
-### Data Fetching
-- Server Components for direct database queries
-- React Suspense for loading states
-- Proper error handling and retry logic
-- Cache invalidation strategies
+**Wall Template**:
+A published, system-managed preset that arranges the currently visible and authorized memories on a wall. It is presentation data, not memory content.
+_Avoid_: Memory template, card template
 
-### Security
-- Input validation and sanitization
-- Proper authentication checks
-- CSRF protection
-- Rate limiting implementation
-- Secure API route handling
+**Presentation Lane**:
+A visual region such as Now, Next, or Later used to organize an arrangement without adding a corresponding concept to the memory.
+_Avoid_: Memory state, memory category
 
-### Performance
-- Image optimization with next/image
-- Font optimization with next/font
-- Route prefetching
-- Proper code splitting
-- Bundle size optimization
+**Template Application**:
+An explicit user action that applies a selected wall template to the current arrangement and creates a reversible arrangement change.
+_Avoid_: Template selection, automatic reflow
 
-## Implementation Process
-1. Plan component hierarchy
-2. Define types and interfaces
-3. Implement server-side logic
-4. Build client components
-5. Add proper error handling
-6. Implement responsive styling
-7. Add loading states
-8. Write tests
+## Access and content
+
+**Visibility**:
+The rule controlling who may read a memory. Private is the Phase 1 state; selected-community and public-discovery are later planned states.
+_Avoid_: Audience, publication status
+
+**Authorized Memory Set**:
+The memories the current user is permitted to read in the active wall or view.
+_Avoid_: All memories, public feed
+
+**Attached Image**:
+An image associated with a memory and governed by the memory's ownership and visibility rules.
+_Avoid_: Remote image, image post
+
+**Category**:
+A labeled meaning assigned to a memory, such as Gratitude, Milestone, Growth, Intention, Kindness, Family, or Health.
+_Avoid_: Tag, channel
