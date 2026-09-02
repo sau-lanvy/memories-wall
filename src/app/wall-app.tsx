@@ -8,6 +8,7 @@ import { useWallInteraction, activeCoordinates, type FormValues, type PositionDr
 
 function formatDate(value: string) { return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value)); }
 
+/** Renders the accessible Wall shell backed by the Wall interaction module. */
 export function WallApp({ initialData }: { initialData: import("@/server/actions").WallData }) {
   const { state, actions, refs } = useWallInteraction({ initialData });
   const {
