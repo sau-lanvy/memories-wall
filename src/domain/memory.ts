@@ -23,6 +23,7 @@ export const memoryImageSchema = z.object({
   uploadedAt: z.string().datetime(),
 }).strict();
 export type MemoryImage = z.infer<typeof memoryImageSchema>;
+export const MEMORY_IMAGE_LIMIT = 5;
 
 export const coordinateSchema = z.object({ x: z.number().finite().min(0).max(100), y: z.number().finite().min(0).max(100) }).strict();
 export type Coordinate = z.infer<typeof coordinateSchema>;
@@ -37,15 +38,24 @@ export const wallPlacementSchema = z.object({
 }).strict();
 export type WallPlacement = Omit<z.infer<typeof wallPlacementSchema>, "sizePreset"> & { sizePreset?: MemorySizePreset };
 
-export const memorySchema = z.object({
+const memoryRecordSchema = z.object({
   id: z.string().min(1), authorId: z.string().min(1), title: z.string().trim().min(1).max(120),
   reflection: z.string().trim().min(1).max(5000), category: memoryCategorySchema,
   visibility: visibilitySchema, createdAt: z.string().datetime(), updatedAt: z.string().datetime(),
   communityIds: z.array(communityIdSchema).default([]),
-  image: memoryImageSchema.optional(),
+  images: z.array(memoryImageSchema).max(MEMORY_IMAGE_LIMIT).default([]),
   placements: z.record(z.string().min(1), wallPlacementSchema),
 }).strict();
-export type Memory = z.infer<typeof memorySchema>;
+// Older rows used `image`. Normalize them at the domain boundary so reads and
+// writes use the ordered gallery without requiring a destructive data migration.
+export const memorySchema = z.preprocess((value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const record = { ...(value as Record<string, unknown>) };
+  if (record.images === undefined && record.image !== undefined) record.images = [record.image];
+  delete record.image;
+  return record;
+}, memoryRecordSchema);
+export type Memory = Omit<z.infer<typeof memorySchema>, "images"> & { images?: MemoryImage[] };
 
 export const createMemorySchema = z.object({
   title: z.string().trim().min(1, "A title is required").max(120),
@@ -88,10 +98,20 @@ export type PlacementMode = "freeform" | "snapped";
 
 export const templateSlotSchema = z.object({ x: z.number().finite().min(0).max(100), y: z.number().finite().min(0).max(100), rotation: z.number().finite().min(-8).max(8).optional(), lane: z.enum(["now", "next", "later"]) }).strict();
 export type TemplateSlot = z.infer<typeof templateSlotSchema>;
-export const wallTemplateSchema = z.object({ id: z.string().min(1), name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(500), previewAsset: z.string().min(1), version: z.number().int().positive(), published: z.literal(true), slots: z.array(templateSlotSchema).min(1) }).strict();
+export const wallTemplateSchema = z.object({ id: z.string().min(1), name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(500), previewAsset: z.string().min(1), version: z.number().int().positive(), published: z.literal(true), backgroundPreset: z.enum(["neutral-texture", "linen", "sage-paper", "clay-paper", "blueprint-paper"]).default("neutral-texture"), slots: z.array(templateSlotSchema).min(1) }).strict();
 export type WallTemplate = z.infer<typeof wallTemplateSchema>;
 
-export const wallDataSchema = z.object({ memories: z.array(memorySchema), snapToGrid: z.boolean() }).strict();
+export const WALL_BACKGROUND_PRESETS = ["neutral-texture", "linen", "sage-paper", "clay-paper", "blueprint-paper"] as const;
+export const wallBackgroundPresetSchema = z.enum(WALL_BACKGROUND_PRESETS);
+export type WallBackgroundPreset = z.infer<typeof wallBackgroundPresetSchema>;
+export const wallPresentationSchema = z.object({
+  wallId: z.string().min(1), userId: z.string().min(1), revision: z.number().int().nonnegative(),
+  backgroundPreset: wallBackgroundPresetSchema, templateId: z.string().min(1).optional(), templateVersion: z.number().int().positive().optional(),
+  undo: z.object({ memories: z.array(memorySchema).transform((value) => value as Memory[]), backgroundPreset: wallBackgroundPresetSchema, templateId: z.string().min(1).optional(), templateVersion: z.number().int().positive().optional() }).optional(),
+}).strict();
+export type WallPresentation = z.infer<typeof wallPresentationSchema>;
+
+export const wallDataSchema = z.object({ memories: z.array(memorySchema), snapToGrid: z.boolean(), backgroundPreset: wallBackgroundPresetSchema.default("neutral-texture"), templateId: z.string().min(1).optional(), templateVersion: z.number().int().positive().optional(), templateRevision: z.number().int().nonnegative().default(0), canUndoTemplate: z.boolean().default(false) }).strict();
 
 export const commentSchema = z.object({
   id: z.string().min(1),

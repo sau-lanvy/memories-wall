@@ -44,9 +44,9 @@ _Avoid_: Audience, publication status
 The memories the current user is permitted to read in the active wall or view.
 _Avoid_: All memories, public feed
 
-**Attached Image**:
-An image associated with a memory and governed by the memory's ownership and visibility rules.
-_Avoid_: Remote image, image post
+**Memory Image Gallery**:
+An ordered collection of up to five images associated with a memory. The first remaining image represents the memory, and every image follows the memory ownership and visibility rules.
+_Avoid_: Attached image, remote image, image post
 
 **Category**:
 A labeled meaning assigned to a memory, such as Gratitude, Milestone, Growth, Intention, Kindness, Family, or Health.

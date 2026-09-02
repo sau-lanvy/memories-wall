@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { memorySchema } from "@/domain/memory";
 import { InMemoryMemoryStore, MemoryPermissionError, MemoryRepository, MemoryValidationError } from "@/server/memory-repository";
 
 const userA = "alice";
@@ -228,5 +229,36 @@ describe("MemoryRepository", () => {
     const repo = new MemoryRepository(store);
     const shared = await repo.createMemory({ title: "Circle note", reflection: "For members", category: "growth", visibility: "selected-community", communityIds: ["community-a"], wallId: "personal" }, userA);
     await expect(repo.createReaction({ memoryId: shared.id }, userB)).rejects.toBeInstanceOf(MemoryPermissionError);
+  });
+
+
+  it("keeps an ordered gallery, promotes the next image, and reads legacy image rows", async () => {
+    const repo = await repository(); const item = await memory(repo);
+    const first = await repo.attachImage(item.id, { mediaType: "image/png", sizeBytes: 100 }, userA);
+    const second = await repo.attachImage(item.id, { mediaType: "image/jpeg", sizeBytes: 200 }, userA);
+    expect((await repo.getMemory(item.id, userA)).images?.map((image) => image.id)).toEqual([first.id, second.id]);
+    await repo.removeImage(item.id, first.id, userA);
+    expect((await repo.getMemoryMedia(item.id, userA))?.id).toBe(second.id);
+    const legacy = memorySchema.parse({ ...item, images: undefined, image: first });
+    expect(legacy.images?.map((image) => image.id)).toEqual([first.id]);
+  });
+
+  it("allows authorized owners to comment, pages oldest first, rate limits, and soft deletes", async () => {
+    const repo = await repository(); const item = await memory(repo);
+    const created = [];
+    for (let index = 0; index < 5; index += 1) created.push(await repo.createComment({ memoryId: item.id, body: `Comment ${index}` }, userA));
+    await expect(repo.createComment({ memoryId: item.id, body: "Too soon" }, userA)).rejects.toThrow("wait");
+    expect((await repo.listComments(item.id, userA, { offset: 0, limit: 2 })).map((comment) => comment.body)).toEqual(["Comment 0", "Comment 1"]);
+    await repo.deleteComment(created[0].id, userA);
+    expect((await repo.listComments(item.id, userA)).map((comment) => comment.body)).not.toContain("Comment 0");
+  });
+
+  it("persists template background and identity, including an empty wall", async () => {
+    const repo = await repository();
+    const applied = await repo.applyWallTemplate({ templateId: "not-a-template" }, userA).catch(() => null);
+    expect(applied).toBeNull();
+    const result = await repo.applyWallTemplate({ templateId: "scattered-notes" }, userA);
+    const presentation = await repo.getWallPresentation("personal", userA);
+    expect(presentation.templateId).toBe("scattered-notes"); expect(presentation.backgroundPreset).toBe("sage-paper"); expect(result.memories).toEqual([]);
   });
 });
