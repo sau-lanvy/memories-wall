@@ -34,6 +34,24 @@ _Avoid_: Memory state, memory category
 An explicit user action that applies a selected wall template to the current arrangement and creates a reversible arrangement change.
 _Avoid_: Template selection, automatic reflow
 
+## Identity and access
+
+**User**:
+The person who owns and uses a personal Wall.
+_Avoid_: Account, member, profile
+
+**Email Address**:
+The address a User has proven they control and may use to authenticate.
+_Avoid_: Registered email, login email
+
+**Verification Challenge**:
+A temporary request to prove control of an Email Address using a one-time code.
+_Avoid_: OTP, verification token
+
+**Session**:
+A revocable period of authenticated access for a User after a Verification Challenge succeeds.
+_Avoid_: Login, authentication state
+
 ## Access and content
 
 **Visibility**:
