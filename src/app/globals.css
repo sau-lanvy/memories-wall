@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+:root { --ink: #e4e3d7; --muted: #a8a79b; --wood: #13140d; --panel: #1b1c15; --panel-high: #292b23; --paper: #f7f3e9; --paper-ink: #303129; --line: #4f453f; --gold: #e9c349; --rose: #dfc1ac; }
+* { box-sizing: border-box; }
+html { background: var(--wood); }
+body { margin: 0; background: var(--wood); color: var(--ink); font-family: var(--font-work-sans), ui-sans-serif, system-ui, sans-serif; }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 3px solid var(--gold); outline-offset: 3px; }
+.font-archive { font-family: var(--font-space-mono), ui-monospace, monospace; }
+.font-editorial { font-family: var(--font-newsreader), Georgia, serif; }
+.wood-grain { background-color: #171812; background-image: radial-gradient(ellipse at 50% 20%, rgba(100, 77, 46, .18), transparent 62%), repeating-linear-gradient(96deg, transparent 0 17px, rgba(103, 82, 50, .055) 18px, transparent 20px), linear-gradient(110deg, rgba(0,0,0,.28), transparent 30%, rgba(0,0,0,.18)); }
+.paper-grain { background-image: linear-gradient(rgba(255,255,255,.16), rgba(255,255,255,.16)), repeating-linear-gradient(0deg, rgba(50,40,30,.025) 0 1px, transparent 1px 4px); }
+.wall-shadow { box-shadow: inset 0 0 120px rgba(0,0,0,.33); }
+.card-shadow { box-shadow: 0 1px 0 rgba(38,30,23,.36), 5px 10px 16px rgba(0,0,0,.28); }
+.card-shadow:hover, .card-selected { box-shadow: 0 1px 0 rgba(38,30,23,.36), 8px 18px 25px rgba(0,0,0,.38); }
+input::placeholder, textarea::placeholder { color: #8d8c81; }
+input, textarea, select { color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .001ms !important; animation-duration: .001ms !important; animation-iteration-count: 1 !important; } }
+@media (max-width: 760px) { .desktop-only { display: none !important; } .wall-canvas { min-height: auto !important; padding: 3.5rem .75rem 1.25rem; } .wall-card { position: relative !important; left: auto !important; top: auto !important; width: 100% !important; margin: .75rem auto; transform: none !important; } }
+@media (min-width: 761px) { .mobile-only { display: none !important; } }
