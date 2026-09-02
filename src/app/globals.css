@@ -66,6 +66,8 @@ input, textarea, select { color: #3a352d; }
 .wall-settings.is-open { max-height: 240px; }
 .recent-memory { transition: transform .2s ease, box-shadow .2s ease; }
 .recent-memory:hover { transform: translateY(-2px); box-shadow: 0 8px 18px rgba(61,51,39,.12); }
+.wall-toast { animation: wall-toast-in .24s ease-out both; }
+@keyframes wall-toast-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .template-preview { display: flex; align-items: center; gap: 12px; }
 .memory-image-thumb, .memory-image-preview > div { background: radial-gradient(circle at 20% 20%, #d9b47d 0 8%, transparent 9%), linear-gradient(135deg, #6f8171 0 38%, #c8d4cc 39% 56%, #8d6f5d 57% 100%); }
 @media (prefers-reduced-motion: reduce) { .note-card { transition: none; } }

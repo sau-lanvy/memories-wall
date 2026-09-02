@@ -1,331 +1,32 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { useEffect, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { categoryMeta, MEMORY_CATEGORIES, type Coordinate, type Memory, type MemoryCategory, type MemorySizePreset, type WallTemplate } from "@/domain/memory";
-import { removeMemoryImageAction, createCommentAction, createMemoryAction, createReactionAction, createReportAction, deleteCommentAction, deleteMemoryAction, getActivityAction, getAllMemoriesAction, getCommunityDataAction, getPublicDiscoveryAction, getReactionAction, getRecentlyAddedAction, listCommentsAction, moderateCommentAction, removeReactionAction, searchMemoriesAction, searchPublicMemoriesAction, setActivityPreferenceAction, updateMemoryAction, updatePlacementAction, listWallTemplatesAction, applyWallTemplateAction, undoTemplateApplicationAction, type ActionResult, type WallData } from "@/server/actions";
-import type { ActivityNotification, CommunityMembership, MemoryComment, Visibility, MemoryImage } from "@/domain/memory";
-
-const STORAGE_KEY = "memories-wall:demo-user:personal";
-const initialForm = { title: "", reflection: "", category: "gratitude" as MemoryCategory, visibility: "private" as Visibility, communityIds: "" };
-type FormValues = typeof initialForm;
-type View = "wall" | "mine" | "all" | "community" | "recent" | "discovery";
-type PositionDraft = { id: string; coordinates: Coordinate };
-type DragState = { id: string; offsetX: number; offsetY: number; coordinates: Coordinate; originalCoordinates: Coordinate };
+import type { CommunityMembership, MemoryComment, Visibility, MemoryImage } from "@/domain/memory";
+import { searchMemoriesAction, searchPublicMemoriesAction } from "@/server/actions";
+import { useWallInteraction, activeCoordinates, type FormValues, type PositionDraft, type View } from "@/app/use-wall-interaction";
 
 function formatDate(value: string) { return new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(new Date(value)); }
-function activeCoordinates(memory: Memory, snapToGrid: boolean): Coordinate { return memory.placements.personal?.[snapToGrid ? "snapped" : "freeform"] ?? { x: 8, y: 8 }; }
-function updateMemoryPosition(memories: Memory[], id: string, coordinates: Coordinate, snapToGrid: boolean): Memory[] {
-  return memories.map((memory) => memory.id === id ? { ...memory, placements: { ...memory.placements, personal: { ...(memory.placements.personal ?? { freeform: coordinates, snapped: coordinates }), [snapToGrid ? "snapped" : "freeform"]: coordinates } } } : memory);
-}
-function clamp(value: number) { return Math.max(2, Math.min(88, value)); }
-function snapCoordinate(coordinate: Coordinate): Coordinate { return { x: Math.round(coordinate.x / 8) * 8, y: Math.round(coordinate.y / 8) * 8 }; }
-function commentsActionAvailable() { try { return typeof listCommentsAction === "function"; } catch { return false; } }
 
-export function WallApp({ initialData }: { initialData: WallData }) {
-  const [data, setData] = useState<WallData>(initialData);
-  const [hydrated, setHydrated] = useState(false);
-  const [view, setView] = useState<View>("wall");
-  const [surfaceMemories, setSurfaceMemories] = useState<Memory[] | null>(null);
-  const [communities, setCommunities] = useState<CommunityMembership[]>([]);
-  const [communityId, setCommunityId] = useState("");
-  const [search, setSearch] = useState("");
-  const [ownershipFilter, setOwnershipFilter] = useState<"all" | "mine" | "shared">("all");
-  const [visibilityFilter, setVisibilityFilter] = useState<"all" | Visibility>("all");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [activity, setActivity] = useState<ActivityNotification[]>([]);
-  const [surfaceLoading, setSurfaceLoading] = useState(false);
-  const [surfaceError, setSurfaceError] = useState<string | null>(null);
-  const [surfaceErrorCode, setSurfaceErrorCode] = useState<"FORBIDDEN" | "UNKNOWN" | null>(null);
-  const [surfaceRequestKey, setSurfaceRequestKey] = useState(0);
-  const [category, setCategory] = useState<MemoryCategory | "all">("all");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [composerOpen, setComposerOpen] = useState(false);
-  const [form, setForm] = useState<FormValues>(initialForm);
-  const [editing, setEditing] = useState(false);
-  const [editForm, setEditForm] = useState({ title: "", reflection: "", category: "gratitude" as MemoryCategory, visibility: "private" as Visibility, communityIds: [] as string[] });
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [positionMode, setPositionMode] = useState<PositionDraft | null>(null);
-  const [comments, setComments] = useState<MemoryComment[]>([]);
-  const [commentDraft, setCommentDraft] = useState("");
-  const [commentsBusy, setCommentsBusy] = useState(false);
-  const [commentsOffset, setCommentsOffset] = useState(0);
-  const [commentsCanLoadMore, setCommentsCanLoadMore] = useState(false);
-  const [reacted, setReacted] = useState(false);
-  const [reactionBusy, setReactionBusy] = useState(false);
-  const [reportReason, setReportReason] = useState<"harmful" | "harassment" | "privacy" | "spam" | "other">("other");
-  const [activityEnabled, setActivityEnabled] = useState(true);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [templates, setTemplates] = useState<WallTemplate[]>([]);
-  const [templateId, setTemplateId] = useState("");
-  const [templateRevision, setTemplateRevision] = useState(initialData.templateRevision ?? 0);
-  const [templatePreview, setTemplatePreview] = useState(false);
-  const [backgroundPreset, setBackgroundPreset] = useState(initialData.backgroundPreset ?? "neutral-texture");
-  const [activeTemplateId, setActiveTemplateId] = useState(initialData.templateId);
-  const [canUndoTemplate, setCanUndoTemplate] = useState(initialData.canUndoTemplate ?? false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [commentsOpen, setCommentsOpen] = useState(true);
-  const [recentOpen, setRecentOpen] = useState(false);
-  const canvasRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<DragState | null>(null);
-  const selectedIdRef = useRef<string | null>(null);
-  const composerTitleRef = useRef<HTMLInputElement>(null);
-  const composerReturnFocusRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    // The server snapshot is authoritative. localStorage is only a non-authoritative
-    // demo backup and must never replace a fresh server read during hydration.
-    setHydrated(true);
-  }, []);
-  useEffect(() => { if (hydrated) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }, [data, hydrated]);
-
-  const displayedMemories = surfaceMemories ?? data.memories;
-  const selected = displayedMemories.find((memory) => memory.id === selectedId) ?? null;
-  const visibleMemories = useMemo(() => displayedMemories.filter((memory) => (category === "all" || memory.category === category) && (ownershipFilter === "all" || ownershipFilter === "mine" ? memory.authorId === "demo-user" : memory.authorId !== "demo-user") && (visibilityFilter === "all" || memory.visibility === visibilityFilter) && (!fromDate || memory.createdAt.slice(0, 10) >= fromDate) && (!toDate || memory.createdAt.slice(0, 10) <= toDate)), [displayedMemories, category, ownershipFilter, visibilityFilter, fromDate, toDate]);
-  const isEmpty = displayedMemories.length === 0;
-  const isOwnedView = view === "wall" || view === "mine";
-  const selectedIsOwned = selected?.authorId === "demo-user";
-  selectedIdRef.current = selectedId;
-
-  useEffect(() => {
-    if (isOwnedView) { setSurfaceMemories(null); setSurfaceError(null); setSurfaceErrorCode(null); return; }
-    setSurfaceLoading(true); setSurfaceError(null); setSurfaceErrorCode(null);
-    void (async () => {
-      if (view === "community") {
-        const result = await getCommunityDataAction(communityId || undefined);
-        if (!result.ok) { setSurfaceError(result.error); setSurfaceErrorCode(result.code === "FORBIDDEN" ? "FORBIDDEN" : "UNKNOWN"); return; }
-        setSurfaceMemories(result.data.memories); setCommunities(result.data.communities); return;
-      }
-      const result = view === "discovery" ? await getPublicDiscoveryAction() : view === "all" ? await getAllMemoriesAction() : await getRecentlyAddedAction();
-      if (!result.ok) { setSurfaceError(result.error); setSurfaceErrorCode(result.code === "FORBIDDEN" ? "FORBIDDEN" : "UNKNOWN"); return; }
-      setSurfaceMemories(result.data);
-    })().catch(() => { setSurfaceError("This surface could not be loaded. Please try again."); setSurfaceErrorCode("UNKNOWN"); }).finally(() => setSurfaceLoading(false));
-  }, [view, communityId, isOwnedView, surfaceRequestKey]);
-
-  useEffect(() => {
-    if (!selected) { setComments([]); setCommentsOffset(0); setCommentsCanLoadMore(false); setReacted(false); return; }
-    setCommentsOffset(0); setCommentsCanLoadMore(false);
-    if (commentsActionAvailable()) void listCommentsAction(selected.id, 0).then((result) => { if (selectedIdRef.current !== selected.id) return; if (result.ok) { setComments(result.data); setCommentsCanLoadMore(result.data.length === 20); } else setNotice({ kind: "error", text: result.error }); }).catch(() => setNotice({ kind: "error", text: "Comments could not be loaded. Please try again." }));
-    const memoryId = selected.id;
-    void getReactionAction(memoryId).then((result) => { if (selectedIdRef.current !== memoryId) return; if (result.ok) setReacted(result.data.reacted); else setNotice({ kind: "error", text: result.error }); }).catch(() => { if (selectedIdRef.current === memoryId) setNotice({ kind: "error", text: "Reaction status could not be loaded. Please try again." }); });
-  }, [selected?.id, selected?.visibility]);
-
-  useEffect(() => {
-    if (typeof listWallTemplatesAction !== "function") return;
-    void listWallTemplatesAction().then((result) => { if (result.ok) setTemplates(result.data); });
-  }, []);
-
-  useEffect(() => {
-    if (view !== "mine") return;
-    void getActivityAction().then((result) => { if (result.ok) setActivity(result.data); });
-  }, [view]);
-
-  function selectMemory(memory: Memory) {
-    setSelectedId(memory.id); setEditing(false); setPositionMode(null);
-    window.setTimeout(() => document.getElementById("memory-details")?.focus(), 0);
-  }
-  function openComposer() {
-    composerReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setForm(initialForm); setNotice(null); setComposerOpen(true);
-    if (!communities.length) void getCommunityDataAction().then((result) => { if (result.ok) setCommunities(result.data.communities); else setNotice({ kind: "error", text: result.error }); }).catch(() => setNotice({ kind: "error", text: "Communities could not be loaded. You can still keep this memory private." }));
-  }
-  function closeComposer() {
-    setComposerOpen(false);
-    window.setTimeout(() => composerReturnFocusRef.current?.focus(), 0);
-  }
-  useEffect(() => {
-    if (composerOpen) window.setTimeout(() => composerTitleRef.current?.focus(), 0);
-  }, [composerOpen]);
-  function onCreate(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setNotice(null);
-    void createMemoryAction(new FormData(event.currentTarget)).then((result) => {
-      if (!result.ok) { setNotice({ kind: "error", text: `${result.error} Check the fields and try again.` }); setBusy(false); return; }
-      setData((current) => ({ ...current, memories: [result.data, ...current.memories] }));
-      setSelectedId(result.data.id); setComposerOpen(false); setForm(initialForm); setNotice({ kind: "success", text: "Memory saved to your wall." }); setBusy(false);
-    }).catch(() => { setNotice({ kind: "error", text: "We could not reach the archive. Your draft is still in the form; please try again." }); setBusy(false); });
-  }
-  function beginEdit() {
-    if (!selected) return;
-    setEditForm({ title: selected.title, reflection: selected.reflection, category: selected.category, visibility: selected.visibility, communityIds: selected.communityIds }); setEditing(true); setNotice(null);
-    if (!communities.length) void getCommunityDataAction().then((result) => { if (result.ok) setCommunities(result.data.communities); else setNotice({ kind: "error", text: result.error }); }).catch(() => setNotice({ kind: "error", text: "Communities could not be loaded. You can still keep this memory private." }));
-  }
-  function saveEdit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!selected) return; setBusy(true); setNotice(null);
-    void updateMemoryAction(selected.id, editForm).then((result) => {
-      if (!result.ok) { setNotice({ kind: "error", text: result.error }); setBusy(false); return; }
-      setData((current) => ({ ...current, memories: current.memories.map((memory) => memory.id === result.data.id ? result.data : memory) }));
-      setSurfaceMemories((current) => current ? (result.data.visibility === "public-discovery" ? current.map((memory) => memory.id === result.data.id ? result.data : memory) : current.filter((memory) => memory.id !== result.data.id)) : current);
-      setEditing(false); setNotice({ kind: "success", text: "Memory updated." }); setBusy(false);
-    }).catch(() => { setNotice({ kind: "error", text: "The update could not be saved. Please try again." }); setBusy(false); });
-  }
-  function submitComment(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!selected || !commentDraft.trim()) return;
-    setCommentsBusy(true);
-    void createCommentAction({ memoryId: selected.id, body: commentDraft }).then((result) => {
-      if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; }
-      setComments((current) => current.length < 20 ? [...current, result.data] : current); setCommentsCanLoadMore((current) => current || comments.length >= 20); setCommentDraft(""); setNotice({ kind: "success", text: "Comment shared." });
-    }).catch(() => setNotice({ kind: "error", text: "The comment could not be shared. Please try again." })).finally(() => setCommentsBusy(false));
-  }
-  function loadMoreComments() {
-    if (!selected || commentsBusy || !commentsCanLoadMore || typeof listCommentsAction !== "function") return;
-    const nextOffset = commentsOffset + comments.length; setCommentsBusy(true);
-    void listCommentsAction(selected.id, nextOffset).then((result) => { if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; } setComments((current) => [...current, ...result.data]); setCommentsOffset(nextOffset); setCommentsCanLoadMore(result.data.length === 20); }).catch(() => setNotice({ kind: "error", text: "More comments could not be loaded." })).finally(() => setCommentsBusy(false));
-  }
-  function addImages(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!selected) return;
-    const form = event.currentTarget;
-    const input = form.querySelector<HTMLInputElement>('input[type="file"][name="photos"]');
-    const formData = new FormData();
-    for (const file of input?.files ?? []) formData.append("photos", file);
-    setCommentsBusy(true);
-    void fetch(`/api/memories/${encodeURIComponent(selected.id)}/images`, { method: "POST", body: formData })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Image upload request failed");
-        return response.json() as Promise<ActionResult<Memory>>;
-      })
-      .then((result) => { if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; } setData((current) => ({ ...current, memories: current.memories.map((memory) => memory.id === result.data.id ? result.data : memory) })); setNotice({ kind: "success", text: "Images added to this memory." }); form.reset(); })
-      .catch(() => setNotice({ kind: "error", text: "The images could not be added." }))
-      .finally(() => setCommentsBusy(false));
-  }
-  function removeImage(imageId: string) {
-    if (!selected) return; setCommentsBusy(true);
-    void removeMemoryImageAction(selected.id, imageId).then((result) => { if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; } setData((current) => ({ ...current, memories: current.memories.map((memory) => memory.id === result.data.id ? result.data : memory) })); setNotice({ kind: "success", text: "Image removed." }); }).catch(() => setNotice({ kind: "error", text: "The image could not be removed." })).finally(() => setCommentsBusy(false));
-  }
-
-  function removeComment(id: string) {
-    setCommentsBusy(true);
-    void deleteCommentAction(id).then((result) => {
-      if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; }
-      setComments((current) => current.filter((comment) => comment.id !== id));
-    }).catch(() => setNotice({ kind: "error", text: "The comment could not be deleted. Please try again." })).finally(() => setCommentsBusy(false));
-  }
-  function moderateCommentFromWall(id: string) {
-    setCommentsBusy(true);
-    void moderateCommentAction(id).then((result) => {
-      if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; }
-      setComments((current) => current.filter((comment) => comment.id !== id));
-    }).catch(() => setNotice({ kind: "error", text: "The response could not be removed. Please try again." })).finally(() => setCommentsBusy(false));
-  }
-  function reportContent(targetType: "memory" | "comment", targetId: string) {
-    if (!selected) return;
-    void createReportAction({ targetType, targetId, reason: reportReason }).then((result) => {
-      setNotice(result.ok ? { kind: "success", text: "Report received by the moderation queue." } : { kind: "error", text: result.error });
-    }).catch(() => setNotice({ kind: "error", text: "The report could not be submitted. Please try again." }));
-  }
-  function toggleReaction() {
-    if (!selected || selected.visibility === "private") return;
-    setReactionBusy(true);
-    const operation = reacted ? removeReactionAction(selected.id) : createReactionAction({ memoryId: selected.id });
-    const memoryId = selected.id;
-    void operation.then((result) => {
-      if (selectedIdRef.current !== memoryId) return;
-      if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; }
-      setReacted(!reacted);
-      setNotice({ kind: "success", text: reacted ? "Reaction removed." : "Reaction shared." });
-    }).catch(() => setNotice({ kind: "error", text: "The reaction could not be saved. Please try again." })).finally(() => setReactionBusy(false));
-  }
-  function toggleActivity() {
-    const next = !activityEnabled;
-    void setActivityPreferenceAction(next).then((result) => { if (result.ok) setActivityEnabled(next); else setNotice({ kind: "error", text: result.error }); }).catch(() => setNotice({ kind: "error", text: "Notification preferences could not be saved." }));
-  }
-  function deleteSelected() {
-    if (!selected) return; setBusy(true);
-    void deleteMemoryAction(selected.id).then((result) => {
-      if (!result.ok) { setNotice({ kind: "error", text: result.error }); setBusy(false); return; }
-      setData((current) => ({ ...current, memories: current.memories.filter((memory) => memory.id !== selected.id) })); setSelectedId(null); setConfirmDelete(false); setNotice({ kind: "success", text: "Memory deleted." }); setBusy(false);
-    }).catch(() => { setNotice({ kind: "error", text: "The memory could not be deleted. Please try again." }); setBusy(false); });
-  }
-  function persistPlacement(id: string, coordinates: Coordinate, previousCoordinates?: Coordinate) {
-    const safeCoordinates = data.snapToGrid ? snapCoordinate(coordinates) : coordinates;
-    setBusy(true);
-    void Promise.resolve(updatePlacementAction({ memoryId: id, coordinates: safeCoordinates })).then((result) => {
-      if (!result.ok) {
-        if (previousCoordinates) setData((current) => ({ ...current, memories: updateMemoryPosition(current.memories, id, previousCoordinates, data.snapToGrid) }));
-        setNotice({ kind: "error", text: result.error }); setBusy(false); return;
-      }
-      setData(result.data); setCanUndoTemplate(Boolean(result.data.canUndoTemplate)); setNotice({ kind: "success", text: `Position saved at ${Math.round(safeCoordinates.x)} percent across and ${Math.round(safeCoordinates.y)} percent down.` }); setBusy(false);
-    }).catch(() => { setNotice({ kind: "error", text: "The position could not be saved. Please try again." }); setBusy(false); });
-  }
-  function changeSize(sizePreset: MemorySizePreset) {
-    if (!selected || !selectedIsOwned) return;
-    const previous = selected.placements.personal?.sizePreset;
-    setData((current) => ({ ...current, memories: current.memories.map((memory) => memory.id === selected.id ? { ...memory, placements: { ...memory.placements, personal: { ...memory.placements.personal, sizePreset } } } : memory) }));
-    setBusy(true);
-    void updatePlacementAction({ memoryId: selected.id, sizePreset }).then((result) => {
-      if (result.ok) { setData(result.data); setCanUndoTemplate(Boolean(result.data.canUndoTemplate)); setNotice({ kind: "success", text: `Card size changed to .` }); }
-      else { setData((current) => ({ ...current, memories: current.memories.map((memory) => memory.id === selected.id ? { ...memory, placements: { ...memory.placements, personal: { ...memory.placements.personal, sizePreset: previous } } } : memory) })); setNotice({ kind: "error", text: result.error }); }
-    }).catch(() => setNotice({ kind: "error", text: "The card size could not be saved. Please try again." })).finally(() => setBusy(false));
-  }
-
-  function applyTemplate() {
-    if (!templateId) return;
-    setBusy(true); setNotice(null);
-    void applyWallTemplateAction({ templateId, expectedRevision: templateRevision }).then((result) => {
-      if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; }
-      setData((current) => ({ ...current, memories: current.memories.map((memory) => result.data.memories.find((item) => item.id === memory.id) ?? memory), backgroundPreset: result.data.backgroundPreset, templateId: result.data.template.id, templateRevision: result.data.revision, canUndoTemplate: true }));
-      setTemplateRevision(result.data.revision); setCanUndoTemplate(true); setBackgroundPreset(result.data.backgroundPreset); setActiveTemplateId(result.data.template.id); setTemplatePreview(false); setNotice({ kind: "success", text: `${result.data.template.name} applied. You can undo this arrangement.` });
-    }).catch(() => setNotice({ kind: "error", text: "The template could not be applied. Please try again." })).finally(() => setBusy(false));
-  }
-  function undoTemplate() {
-    setBusy(true);
-    void undoTemplateApplicationAction(templateRevision).then((result) => {
-      if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; }
-      setData((current) => ({ ...current, memories: current.memories.map((memory) => result.data.memories.find((item) => item.id === memory.id) ?? memory), backgroundPreset: result.data.backgroundPreset, templateId: result.data.templateId, templateRevision: result.data.revision, canUndoTemplate: false })); setTemplateRevision(result.data.revision); setCanUndoTemplate(false); setBackgroundPreset(result.data.backgroundPreset); setActiveTemplateId(result.data.templateId); setNotice({ kind: "success", text: "Previous arrangement restored." });
-    }).catch(() => setNotice({ kind: "error", text: "The arrangement could not be restored. Please try again." })).finally(() => setBusy(false));
-  }
-
-  function toggleSnap() {
-    if (!data.memories.length) return;
-    const next = !data.snapToGrid; setBusy(true);
-    void Promise.resolve(updatePlacementAction({ memoryId: selectedId ?? data.memories[0]?.id ?? "none", snapToGrid: next })).then((result) => {
-      if (!result.ok && data.memories.length) { setNotice({ kind: "error", text: result.error }); setBusy(false); return; }
-      if (result.ok) setData(result.data); setNotice({ kind: "success", text: next ? "Snap to Grid on. Snapped positions restored." : "Snap to Grid off. Freeform positions restored." }); setBusy(false);
-    }).catch(() => { setNotice({ kind: "error", text: "The grid preference could not be saved. Please try again." }); setBusy(false); });
-  }
-  function onPointerDown(event: ReactPointerEvent<HTMLElement>, memory: Memory) {
-    if (event.button !== 0 || (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 760px)").matches)) return;
-    const canvas = canvasRef.current; if (!canvas) return;
-    const rect = canvas.getBoundingClientRect(); const current = activeCoordinates(memory, data.snapToGrid);
-    const x = ((event.clientX - rect.left) / rect.width) * 100; const y = ((event.clientY - rect.top) / rect.height) * 100;
-    dragRef.current = { id: memory.id, offsetX: x - current.x, offsetY: y - current.y, coordinates: current, originalCoordinates: current }; setDragId(memory.id); selectMemory(memory); if (typeof event.currentTarget.setPointerCapture === "function") event.currentTarget.setPointerCapture(event.pointerId);
-  }
-  function onPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
-    const drag = dragRef.current; const canvas = canvasRef.current;
-    if (!drag || !canvas) return;
-    const rect = canvas.getBoundingClientRect(); const next = { x: clamp(((event.clientX - rect.left) / rect.width) * 100 - drag.offsetX), y: clamp(((event.clientY - rect.top) / rect.height) * 100 - drag.offsetY) };
-    const coordinates = data.snapToGrid ? snapCoordinate(next) : next;
-    drag.coordinates = coordinates;
-    setData((current) => ({ ...current, memories: updateMemoryPosition(current.memories, drag.id, coordinates, data.snapToGrid) }));
-  }
-  function onPointerUp() {
-    if (!dragRef.current) return;
-    const drag = dragRef.current; const id = drag.id; dragRef.current = null; setDragId(null);
-    persistPlacement(id, drag.coordinates, drag.originalCoordinates);
-  }
-  function startPositionMode() { if (selected) setPositionMode({ id: selected.id, coordinates: activeCoordinates(selected, data.snapToGrid) }); }
-  function movePosition(deltaX: number, deltaY: number) { if (positionMode) { const factor = data.snapToGrid ? 4 : 1; setPositionMode({ ...positionMode, coordinates: { x: clamp(positionMode.coordinates.x + deltaX * factor), y: clamp(positionMode.coordinates.y + deltaY * factor) } }); } }
-  function confirmPosition() {
-    if (!positionMode) return;
-    const draft = positionMode;
-    const current = selected ?? data.memories.find((memory) => memory.id === draft.id);
-    if (!current) return;
-    const previous = activeCoordinates(current, data.snapToGrid);
-    setPositionMode(null);
-    setData((current) => ({ ...current, memories: updateMemoryPosition(current.memories, draft.id, draft.coordinates, data.snapToGrid) }));
-    persistPlacement(draft.id, draft.coordinates, previous);
-  }
-  useEffect(() => {
-    if (!positionMode) return;
-    function onKeyDown(event: KeyboardEvent) {
-      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) { event.preventDefault(); movePosition(event.key === "ArrowRight" ? 2 : event.key === "ArrowLeft" ? -2 : 0, event.key === "ArrowDown" ? 2 : event.key === "ArrowUp" ? -2 : 0); }
-      if (event.key === "Enter") { event.preventDefault(); confirmPosition(); }
-      if (event.key === "Escape") { event.preventDefault(); setPositionMode(null); }
-    }
-    window.addEventListener("keydown", onKeyDown); return () => window.removeEventListener("keydown", onKeyDown);
-  }, [positionMode]);
-
+/** Renders the accessible Wall shell backed by the Wall interaction module. */
+export function WallApp({ initialData }: { initialData: import("@/server/actions").WallData }) {
+  const { state, actions, refs } = useWallInteraction({ initialData });
+  const {
+    data, view, setView, surfaceMemories, setSurfaceMemories, communities, setCommunities, communityId, setCommunityId,
+    search, setSearch, ownershipFilter, setOwnershipFilter, visibilityFilter, setVisibilityFilter, fromDate, setFromDate, toDate, setToDate,
+    activity, surfaceLoading, setSurfaceLoading, surfaceError, setSurfaceError, surfaceErrorCode, setSurfaceErrorCode, surfaceRequestKey, setSurfaceRequestKey,
+    category, setCategory, selectedId, setSelectedId, selected, visibleMemories, isEmpty, isOwnedView, selectedIsOwned, composerOpen, setComposerOpen,
+    form, setForm, editing, setEditing, editForm, setEditForm, confirmDelete, setConfirmDelete, notice, setNotice, busy, positionMode, setPositionMode,
+    comments, commentDraft, setCommentDraft, commentsBusy, commentsCanLoadMore, reacted, reactionBusy, reportReason, setReportReason, activityEnabled,
+    dragId, templates, templateId, setTemplateId, templateRevision, templatePreview, setTemplatePreview, backgroundPreset, activeTemplateId,
+    canUndoTemplate, sidebarOpen, setSidebarOpen, commentsOpen, setCommentsOpen, recentOpen, setRecentOpen,
+  } = state;
+  const {
+    selectMemory, openComposer, closeComposer, onCreate, beginEdit, saveEdit, submitComment, loadMoreComments, addImages, removeImage,
+    removeComment, moderateCommentFromWall, reportContent, toggleReaction, toggleActivity, deleteSelected, changeSize, applyTemplate,
+    undoTemplate, toggleSnap, onPointerDown, onPointerMove, onPointerUp, startPositionMode, movePosition, confirmPosition,
+  } = actions;
+  const { canvasRef, composerTitleRef } = refs;
   return <div className="app-shell flex h-screen w-screen overflow-hidden bg-[#13140d]">
     <aside className={`app-sidebar relative z-40 flex h-full flex-shrink-0 flex-col overflow-y-auto border-r border-[#e5e1d8] bg-[#f4f1ea] text-[#3a352d] ${sidebarOpen ? "is-open" : "is-collapsed"}`}>
       <div className="p-6">
@@ -370,7 +71,6 @@ export function WallApp({ initialData }: { initialData: WallData }) {
           <button type="button" className="grid h-10 w-10 place-items-center rounded-full border border-[#e5e1d8] bg-white/80 text-[#826e5e] shadow-sm">D</button>
         </div>
       </header>
-      <div className="relative z-30 mx-8 mb-4 flex flex-wrap items-end justify-between gap-4"><div><p className="text-[10px] font-bold uppercase tracking-[.2em] text-[#c16e54]">{view === "mine" ? "My archive" : view === "community" ? "Shared circles" : view === "all" ? "Authorized archive" : view === "recent" ? "Freshly shared" : view === "discovery" ? "Open archive" : "Personal wall"}</p><h3 className="font-serif-custom mt-1 text-2xl text-[#3a352d]">{isEmpty ? "A place for what matters" : view === "mine" ? "Everything you have kept" : view === "community" ? "A wider circle, thoughtfully" : view === "all" ? "Everything you can see" : view === "recent" ? "Recently added memories" : view === "discovery" ? "Public, thoughtfully shared" : "Small moments, kept close"}</h3>{!isEmpty && <p className="mt-1 text-sm text-[#a49e92]">{visibleMemories.length} {visibleMemories.length === 1 ? "memory" : "memories"}{category !== "all" ? ` · ${categoryMeta[category].label}` : ""}</p>}</div></div>
         <div className="wall-controls relative z-30 mx-8 mb-4 flex flex-wrap items-center gap-3" aria-hidden="true">
           {(view === "all" || view === "discovery") && <form className="relative" onSubmit={(event) => { event.preventDefault(); if (!search.trim()) return; setSurfaceLoading(true); setSurfaceError(null); const searchRequest = view === "discovery" ? searchPublicMemoriesAction(search) : searchMemoriesAction(search); void searchRequest.then((result) => { if (result.ok) setSurfaceMemories(result.data); else { setSurfaceError(result.error); setSurfaceErrorCode(result.code === "FORBIDDEN" ? "FORBIDDEN" : "UNKNOWN"); } }).catch(() => { setSurfaceError("This search could not be completed. Please try again."); setSurfaceErrorCode("UNKNOWN"); }).finally(() => setSurfaceLoading(false)); }}><input aria-label="Search memories" value={search} onChange={(event) => setSearch(event.target.value)} placeholder={view === "discovery" ? "Search public memories" : "Search your authorized memories"} className="w-72 rounded-full border border-[#e5e1d8] bg-white/80 px-4 py-2 text-sm text-[#5c554a] shadow-sm placeholder-[#a49e92] backdrop-blur-sm focus:outline-none focus:ring-2 focus:ring-[#c16e54]/50" /><button className="ml-2 rounded-full border border-[#e5e1d8] bg-white px-4 py-2 text-sm text-[#5c554a] shadow-sm hover:bg-[#f4f1ea]">Search</button></form>}
           {view === "community" && communities.length > 0 && <label className="rounded-full border border-[#e5e1d8] bg-white/80 px-4 py-2 text-sm text-[#5c554a] shadow-sm">Community<select value={communityId} onChange={(event) => setCommunityId(event.target.value)} className="ml-2 rounded-full border border-[#e5e1d8] bg-white px-3 py-1 text-sm"><option value="">All communities</option>{communities.map((community) => <option key={community.communityId} value={community.communityId}>{community.name}</option>)}</select></label>}
@@ -378,13 +78,13 @@ export function WallApp({ initialData }: { initialData: WallData }) {
           {templatePreview && templateId && (() => { const template = templates.find((item) => item.id === templateId); return template ? <figure className="template-preview rounded-2xl border border-[#e5e1d8] bg-[#fdfcfa] p-3 shadow-sm"><img src={template.previewAsset} alt={`${template.name} preview`} className="h-24 w-40 rounded-lg object-cover" /><figcaption className="mt-2 max-w-40 text-xs leading-4 text-[#7a7469]">{template.description}</figcaption></figure> : null; })()}
           <div className="flex flex-wrap gap-2 text-xs text-[#7a7469]"><label className="rounded-full border border-[#e5e1d8] bg-white/80 px-3 py-1.5 shadow-sm">Ownership<select aria-label="Ownership filter" value={ownershipFilter} onChange={(event) => setOwnershipFilter(event.target.value as typeof ownershipFilter)} className="ml-1 rounded border-0 bg-transparent text-[#5c554a]"><option value="all">Everyone</option><option value="mine">Mine</option><option value="shared">Shared</option></select></label><label className="rounded-full border border-[#e5e1d8] bg-white/80 px-3 py-1.5 shadow-sm">Visibility<select aria-label="Visibility filter" value={visibilityFilter} onChange={(event) => setVisibilityFilter(event.target.value as typeof visibilityFilter)} className="ml-1 rounded border-0 bg-transparent text-[#5c554a]"><option value="all">Any</option><option value="private">Private</option><option value="selected-community">Selected community</option><option value="public-discovery">Public discovery</option></select></label><label className="rounded-full border border-[#e5e1d8] bg-white/80 px-3 py-1.5 shadow-sm">From<input aria-label="Filter from date" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} className="ml-1 rounded border-0 bg-transparent text-[#5c554a]" /></label><label className="rounded-full border border-[#e5e1d8] bg-white/80 px-3 py-1.5 shadow-sm">To<input aria-label="Filter to date" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} className="ml-1 rounded border-0 bg-transparent text-[#5c554a]" /></label></div>
         </div>
-        {notice && <div role="status" className={`relative z-30 mx-8 mb-4 rounded-lg border px-4 py-3 text-sm shadow-sm ${notice.kind === "success" ? "border-[#8ba47d] bg-[#eef4e9] text-[#4a5444]" : "border-[#b56e6e] bg-[#f9e9e7] text-[#6e4e50]"}`}>{notice.text}</div>}
         <div className="relative min-h-0 flex-1 overflow-hidden px-8 pb-6">
         {surfaceLoading && <section role="status" className="grid min-h-[30vh] place-items-center rounded-lg border border-[#e5e1d8] bg-white/60 p-8 text-center text-[#7a7469]">Loading this surface…</section>}
         {surfaceError && !surfaceLoading && <section role="alert" className="grid min-h-[30vh] place-items-center rounded-lg border border-[#b56e6e] bg-[#f9e9e7] p-8 text-center"><div><p className="font-serif-custom text-2xl text-[#6e4e50]">{surfaceErrorCode === "FORBIDDEN" ? "This view is private." : "This surface is unavailable."}</p><p className="mt-2 text-sm text-[#7a7469]">{surfaceError}</p><button type="button" onClick={() => setSurfaceRequestKey((current) => current + 1)} className="mt-4 text-sm text-[#c16e54] underline">Try again</button>{surfaceErrorCode === "FORBIDDEN" && <button type="button" onClick={() => setView("wall")} className="ml-4 mt-4 text-sm text-[#c16e54] underline">Back to your wall</button>}</div></section>}
-        {!surfaceLoading && !surfaceError && (isEmpty ? <section className={"wall-background-" + backgroundPreset + " grid h-full min-h-[54vh] place-items-center rounded-lg border border-dashed border-[#c5c1b7] bg-white/50 p-8 text-center"}><div className="max-w-md"><div aria-hidden="true" className="mx-auto mb-5 grid h-16 w-16 rotate-[-4deg] place-items-center rounded-sm border border-[#e5e1d8] bg-[#f4ebd0] text-3xl text-[#a39774] shadow-md">✦</div><h3 className="font-serif-custom text-3xl text-[#3a352d]">{view === "wall" || view === "mine" ? "Your wall is waiting" : view === "discovery" ? "Nothing public here yet" : "Nothing shared here yet"}</h3><p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-[#7a7469]">{view === "wall" || view === "mine" ? "Capture a moment worth remembering. It will stay private, ready for you to revisit whenever you need it." : view === "discovery" ? "Public memories will appear here when someone chooses to share a reflection beyond their communities." : "Shared memories will appear here when a community member chooses to share them."}</p>{(view === "wall" || view === "mine") && <button type="button" onClick={openComposer} className="mt-7 rounded-full bg-[#262421] px-6 py-3 font-medium text-[#f4f1ea] shadow-sm transition hover:bg-[#1a1816]">Start a Memory <span aria-hidden="true">→</span></button>}</div></section> : <section ref={canvasRef} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} aria-label="Memory wall" className={"wall-background-" + backgroundPreset + " relative h-full min-h-[560px] overflow-hidden"}>
+        {!surfaceLoading && !surfaceError && (isEmpty ? <section aria-label="Memory wall" className={"wall-background-" + backgroundPreset + " relative grid h-full min-h-[54vh] place-items-center rounded-lg border border-dashed border-[#c5c1b7] bg-white/50 p-8 text-center"}><div className="pointer-events-none absolute left-5 top-5 max-w-sm rounded-2xl border border-white/70 bg-[#fdfcfa]/85 px-5 py-4 text-left shadow-sm backdrop-blur-sm"><p className="font-archive text-[10px] font-bold uppercase tracking-[.18em] text-[#a49e92]">{category === "all" ? "The whole archive" : categoryMeta[category].label}</p><p className="font-serif-custom mt-1 text-xl italic leading-tight text-[#3a352d]">{category === "all" ? "A collection of moments, kept close." : categoryMeta[category].description}</p></div><div className="max-w-md"><div aria-hidden="true" className="mx-auto mb-5 grid h-16 w-16 rotate-[-4deg] place-items-center rounded-sm border border-[#e5e1d8] bg-[#f4ebd0] text-3xl text-[#a39774] shadow-md">✦</div><h3 className="font-serif-custom text-3xl text-[#3a352d]">{view === "wall" || view === "mine" ? "Your wall is waiting" : view === "discovery" ? "Nothing public here yet" : "Nothing shared here yet"}</h3><p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-[#7a7469]">{view === "wall" || view === "mine" ? "Capture a moment worth remembering. It will stay private, ready for you to revisit whenever you need it." : view === "discovery" ? "Public memories will appear here when someone chooses to share a reflection beyond their communities." : "Shared memories will appear here when a community member chooses to share them."}</p>{(view === "wall" || view === "mine") && <button type="button" onClick={openComposer} className="mt-7 rounded-full bg-[#262421] px-6 py-3 font-medium text-[#f4f1ea] shadow-sm transition hover:bg-[#1a1816]">Start a Memory <span aria-hidden="true">→</span></button>}</div></section> : <section ref={canvasRef} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp} aria-label="Memory wall" className={"wall-background-" + backgroundPreset + " relative h-full min-h-[560px] overflow-hidden"}>
           <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 199px, #000 199px, #000 200px), repeating-linear-gradient(90deg, transparent, transparent 399px, #000 399px, #000 400px)" }} />
           <div className="pointer-events-none absolute left-2 top-2 text-[9px] font-bold uppercase tracking-[.18em] text-[#a49e92]">{data.snapToGrid ? "Aligned desk · snapped positions" : "Open desk · drag to arrange"}</div>
+          <div className="pointer-events-none relative z-10 mx-5 mt-5 max-w-sm rounded-2xl border border-white/70 bg-[#fdfcfa]/85 px-5 py-4 shadow-sm backdrop-blur-sm"><p className="font-archive text-[10px] font-bold uppercase tracking-[.18em] text-[#a49e92]">{category === "all" ? "The whole archive" : categoryMeta[category].label}</p><p className="font-serif-custom mt-1 text-xl italic leading-tight text-[#3a352d]">{category === "all" ? "A collection of moments, kept close." : categoryMeta[category].description}</p></div>
           {visibleMemories.map((memory, index) => <MemoryCard key={memory.id} memory={memory} selected={memory.id === selectedId} dragging={memory.id === dragId} index={index} snapToGrid={data.snapToGrid} onSelect={() => selectMemory(memory)} onPointerDown={(event) => onPointerDown(event, memory)} positionOverride={positionMode?.id === memory.id ? positionMode.coordinates : undefined} />)}
           {!visibleMemories.length && <div className="relative z-10 grid min-h-[520px] place-items-center text-center"><div><p className="font-serif-custom text-2xl text-[#3a352d]">Nothing in this section yet.</p><button type="button" onClick={() => setCategory("all")} className="mt-3 text-sm text-[#c16e54] underline underline-offset-4">Show all memories</button></div></div>}
         </section>)}
@@ -395,6 +95,7 @@ export function WallApp({ initialData }: { initialData: WallData }) {
       <WallSettings open={recentOpen} onToggle={() => setRecentOpen((open) => !open)} search={search} setSearch={setSearch} view={view} onSearch={(query) => { setView(view === "discovery" ? "discovery" : "all"); setSurfaceLoading(true); setSurfaceError(null); const request = view === "discovery" ? searchPublicMemoriesAction(query) : searchMemoriesAction(query); void request.then((result) => { if (result.ok) setSurfaceMemories(result.data); else setSurfaceError(result.error); }).catch(() => setSurfaceError("This search could not be completed. Please try again.")).finally(() => setSurfaceLoading(false)); }} communityId={communityId} setCommunityId={setCommunityId} communities={communities} ownershipFilter={ownershipFilter} setOwnershipFilter={setOwnershipFilter} visibilityFilter={visibilityFilter} setVisibilityFilter={setVisibilityFilter} fromDate={fromDate} setFromDate={setFromDate} toDate={toDate} setToDate={setToDate} templates={templates} templateId={templateId} setTemplateId={setTemplateId} templatePreview={templatePreview} setTemplatePreview={setTemplatePreview} templateRevision={templateRevision} activeTemplateId={activeTemplateId} canUndoTemplate={canUndoTemplate} busy={busy} applyTemplate={applyTemplate} undoTemplate={undoTemplate} />
     {composerOpen && <Composer titleRef={composerTitleRef} communities={communities} form={form} setForm={setForm} busy={busy} notice={notice} onSubmit={onCreate} onClose={closeComposer} />}
     {confirmDelete && selected && <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4" role="presentation"><section role="alertdialog" aria-modal="true" aria-labelledby="delete-title" className="w-full max-w-md rounded-lg border border-[#e5e1d8] bg-[#fdfcfa] p-6 shadow-2xl"><p className="font-archive text-[10px] uppercase tracking-widest text-[#b56e6e]">Permanent action</p><h2 id="delete-title" className="font-serif-custom mt-2 text-2xl text-[#3a352d]">Delete this memory?</h2><p className="mt-3 text-sm leading-6 text-[#7a7469]">“{selected.title}” will be removed from your wall. This cannot be undone.</p><div className="mt-6 flex justify-end gap-3"><button type="button" onClick={() => setConfirmDelete(false)} className="rounded-lg border border-[#e5e1d8] px-4 py-2 text-sm text-[#7a7469]">Keep it</button><button type="button" onClick={deleteSelected} disabled={busy} className="rounded-lg bg-[#b56e6e] px-4 py-2 text-sm font-semibold text-white">{busy ? "Deleting…" : "Delete memory"}</button></div></section></div>}
+    {notice && !composerOpen && <div role="status" className={`wall-toast fixed bottom-6 right-6 z-[80] flex max-w-sm items-start gap-4 rounded-2xl border px-5 py-4 text-sm shadow-xl ${notice.kind === "success" ? "border-[#8ba47d] bg-[#eef4e9] text-[#4a5444]" : "border-[#b56e6e] bg-[#f9e9e7] text-[#6e4e50]"}`}><span className="flex-1 leading-6">{notice.text}</span><button type="button" onClick={() => setNotice(null)} aria-label="Dismiss notification" className="shrink-0 text-lg leading-none opacity-60 transition hover:opacity-100">×</button></div>}
     <div aria-live="polite" aria-atomic="true" className="sr-only">{positionMode ? `Position mode. ${Math.round(positionMode.coordinates.x)} percent across, ${Math.round(positionMode.coordinates.y)} percent down. Use arrow controls, then confirm or cancel.` : notice?.text ?? (selected ? `Selected memory: ${selected.title}` : "")}</div>
   </div>;
 }

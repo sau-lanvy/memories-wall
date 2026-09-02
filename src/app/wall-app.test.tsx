@@ -16,7 +16,14 @@ const base: WallData = { snapToGrid: false, memories: [{ id: "one", authorId: "d
 
 describe("wall public behavior", () => { beforeEach(() => window.localStorage.clear());
   it("offers one obvious start action for a first visit", () => { render(<WallApp initialData={{ memories: [], snapToGrid: false }} />); expect(screen.getAllByRole("button", { name: "Start a Memory" }).length).toBeGreaterThanOrEqual(1); expect(screen.getByText("Your wall is waiting")).toBeInTheDocument(); });
-  it("renders category meaning as accessible text, not color alone", () => { render(<WallApp initialData={base} />); expect(screen.getAllByText("Gratitude").length).toBeGreaterThan(0); expect(screen.getByRole("button", { name: "A good beginning, Gratitude memory" })).toBeInTheDocument(); });
+  it("renders category meaning as accessible text, not color alone", () => { render(<WallApp initialData={base} />); expect(screen.getAllByText("Gratitude").length).toBeGreaterThan(0); expect(screen.getByRole("button", { name: "A good beginning, Gratitude memory" })).toBeInTheDocument(); expect(screen.queryByText("My archive")).not.toBeInTheDocument(); expect(screen.queryByText("Everything you have kept")).not.toBeInTheDocument(); });
+  it("places the active category description inside the wall", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    render(<WallApp initialData={base} />);
+    await user.click(screen.getByRole("button", { name: "Gratitude" }));
+    expect(screen.getByText("Notice the good that is already here.")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Memory wall" })).toContainElement(screen.getByText("Notice the good that is already here."));
+  });
   it("shows gallery position labels and keyboard-accessible thumbnails", async () => {
     const galleryData = { ...base, memories: [{ ...base.memories[0], images: [{ id: "image-one", mediaType: "image/png" as const, sizeBytes: 100, storageKey: "missing-one", uploadedAt: "2026-01-01T00:00:00.000Z" }, { id: "image-two", mediaType: "image/png" as const, sizeBytes: 100, storageKey: "missing-two", uploadedAt: "2026-01-01T00:00:01.000Z" }] }] };
     render(<WallApp initialData={galleryData} />);
@@ -39,7 +46,9 @@ describe("wall public behavior", () => { beforeEach(() => window.localStorage.cl
     expect(fetchMock).toHaveBeenCalledWith("/api/memories/one/images", expect.objectContaining({ method: "POST" }));
     expect((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body).toBeInstanceOf(FormData);
     expect(((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body as FormData).getAll("photos")).toHaveLength(1);
-    expect(await screen.findByRole("status")).toHaveTextContent("Images added to this memory.");
+    const toast = await screen.findByRole("status");
+    expect(toast).toHaveTextContent("Images added to this memory.");
+    expect(toast).toHaveClass("wall-toast");
     vi.unstubAllGlobals();
   });
   it("offers a separate public discovery surface", () => { render(<WallApp initialData={base} />); expect(screen.getByRole("button", { name: "Public discovery" })).toBeInTheDocument(); });

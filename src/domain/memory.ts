@@ -165,12 +165,12 @@ export const activitySchema = z.object({
 }).strict();
 export type ActivityNotification = z.infer<typeof activitySchema>;
 
-export const categoryMeta: Record<MemoryCategory, { label: string; icon: string; color: string; surface: string }> = {
-  gratitude: { label: "Gratitude", icon: "✦", color: "#d7b94b", surface: "#f4ebd0" },
-  milestone: { label: "Milestone", icon: "◆", color: "#c16e54", surface: "#edd8d9" },
-  growth: { label: "Growth", icon: "↗", color: "#6b855c", surface: "#e1e8dc" },
-  intention: { label: "Intention", icon: "◎", color: "#7188a4", surface: "#e5e4f2" },
-  kindness: { label: "Kindness", icon: "♡", color: "#b56e6e", surface: "#f4ede9" },
-  family: { label: "Family", icon: "⌂", color: "#9c827b", surface: "#f4f1ea" },
-  health: { label: "Health", icon: "+", color: "#6d8c72", surface: "#e1e8dc" },
+export const categoryMeta: Record<MemoryCategory, { label: string; icon: string; color: string; surface: string; description: string }> = {
+  gratitude: { label: "Gratitude", icon: "✦", color: "#d7b94b", surface: "#f4ebd0", description: "Notice the good that is already here." },
+  milestone: { label: "Milestone", icon: "◆", color: "#c16e54", surface: "#edd8d9", description: "Mark the moments that moved you forward." },
+  growth: { label: "Growth", icon: "↗", color: "#6b855c", surface: "#e1e8dc", description: "Make room for the person you are becoming." },
+  intention: { label: "Intention", icon: "◎", color: "#7188a4", surface: "#e5e4f2", description: "Give a quiet direction to what comes next." },
+  kindness: { label: "Kindness", icon: "♡", color: "#b56e6e", surface: "#f4ede9", description: "Keep the gestures that made the day gentler." },
+  family: { label: "Family", icon: "⌂", color: "#9c827b", surface: "#f4f1ea", description: "Hold close the people and places that ground you." },
+  health: { label: "Health", icon: "+", color: "#6d8c72", surface: "#e1e8dc", description: "Remember the choices that help you feel whole." },
 };
