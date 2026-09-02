@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { memorySchema } from "@/domain/memory";
-import { InMemoryMemoryStore, MemoryPermissionError, MemoryRepository, MemoryValidationError } from "@/server/memory-repository";
+import { InMemoryMemoryStore, MemoryPermissionError, MemoryRepository, MemoryValidationError, type MemoryImageUrlSigner } from "@/server/memory-repository";
 
 const userA = "alice";
 const userB = "bob";
@@ -172,6 +172,20 @@ describe("MemoryRepository", () => {
     expect(await repo.getMemoryMedia(item.id, userA)).toEqual(image);
     await expect(repo.attachImage(item.id, { mediaType: "image/svg+xml", sizeBytes: 10 }, userA)).rejects.toThrow();
     await expect(repo.getMemoryMedia(item.id, userB)).rejects.toBeInstanceOf(MemoryPermissionError);
+  });
+
+  it("returns SAS URLs for stored images at the server image-data boundary", async () => {
+    const signer: MemoryImageUrlSigner = {
+      sign: async (storageKey) => `https://storage.test/${storageKey}?sig=read`,
+    };
+    const repo = new MemoryRepository(new InMemoryMemoryStore(), signer);
+    const item = await memory(repo);
+    await repo.attachImage(item.id, { mediaType: "image/png", sizeBytes: 1024 }, userA);
+
+    const result = await repo.getMemory(item.id, userA);
+
+    expect(result.images?.[0].url).toMatch(/^https:\/\/storage\.test\/memory\/alice\/.+\?sig=read$/);
+    expect(result.images?.[0].thumbnailUrl).toMatch(/^https:\/\/storage\.test\/memory\/alice\/thumbnails\/.+\?sig=read$/);
   });
 
   it("supports public discovery while keeping narrower memories out of it", async () => {

@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@azure/data-tables": "^13.3.0",
+    "@azure/storage-blob": "^12.33.0",
     "@react-three/fiber": "^9.7.0",
     "@types/three": "^0.185.4",
     "next": "^16.0.0",
