@@ -22,7 +22,7 @@ export const memoryImageSchema = z.object({
   thumbnailKey: z.string().min(1).optional(),
   uploadedAt: z.string().datetime(),
 }).strict();
-export type MemoryImage = z.infer<typeof memoryImageSchema>;
+export type MemoryImage = z.infer<typeof memoryImageSchema> & { url?: string; thumbnailUrl?: string };
 export const MEMORY_IMAGE_LIMIT = 5;
 
 export const coordinateSchema = z.object({ x: z.number().finite().min(0).max(100), y: z.number().finite().min(0).max(100) }).strict();
