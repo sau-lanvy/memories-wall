@@ -36,6 +36,7 @@ function CardMesh({ memory, index, treatment, reducedMotion }: { memory: Memory;
   </group>;
 }
 
+/** Renders the selected template's decorative scene without owning wall interaction. */
 export function ThreeWall({ memories, template }: { memories: Memory[]; template?: WallTemplate }) {
   if (typeof window !== "undefined" && !("ResizeObserver" in window)) return null;
   const cards = useMemo(() => memories, [memories]);
