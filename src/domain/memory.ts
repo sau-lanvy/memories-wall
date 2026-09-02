@@ -3,7 +3,7 @@ import { z } from "zod";
 export const MEMORY_CATEGORIES = ["gratitude", "milestone", "growth", "intention", "kindness", "family", "health"] as const;
 export const memoryCategorySchema = z.enum(MEMORY_CATEGORIES);
 export type MemoryCategory = z.infer<typeof memoryCategorySchema>;
-export const VISIBILITIES = ["private", "selected-community"] as const;
+export const VISIBILITIES = ["private", "selected-community", "public-discovery"] as const;
 export const visibilitySchema = z.enum(VISIBILITIES);
 export type Visibility = z.infer<typeof visibilitySchema>;
 export const communityIdSchema = z.string().trim().min(1).max(80);
@@ -94,6 +94,17 @@ export const commentSchema = z.object({
 export type MemoryComment = z.infer<typeof commentSchema>;
 export const createCommentSchema = z.object({ memoryId: z.string().min(1), body: z.string().trim().min(1, "A comment is required").max(2000) }).strict();
 export type CreateCommentInput = z.input<typeof createCommentSchema>;
+
+export const reactionSchema = z.object({
+  id: z.string().min(1),
+  memoryId: z.string().min(1),
+  userId: z.string().min(1),
+  kind: z.literal("appreciate"),
+  createdAt: z.string().datetime(),
+}).strict();
+export type MemoryReaction = z.infer<typeof reactionSchema>;
+export const createReactionSchema = z.object({ memoryId: z.string().min(1) }).strict();
+export type CreateReactionInput = z.input<typeof createReactionSchema>;
 
 export const reportReasonSchema = z.enum(["harmful", "harassment", "privacy", "spam", "other"]);
 export type ReportReason = z.infer<typeof reportReasonSchema>;

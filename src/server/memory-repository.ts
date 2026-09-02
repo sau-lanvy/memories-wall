@@ -4,12 +4,12 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createAzureTableMemoryStore } from "@/server/azure-table-memory-store";
 import {
-  activitySchema, commentSchema, coordinateSchema, createCommentSchema, createMemorySchema, createReportSchema,
+  activitySchema, commentSchema, coordinateSchema, createCommentSchema, createMemorySchema, createReactionSchema, createReportSchema,
   listMemoryFiltersSchema, memorySchema, memoryImageSchema, placementUpdateSchema, reportSchema,
-  updateMemorySchema, type ActivityNotification, type CommunityMembership, type Coordinate,
+  reactionSchema, updateMemorySchema, type ActivityNotification, type CommunityMembership, type Coordinate,
   type MemoryComment,
-  type CreateCommentInput, type CreateMemoryInput, type CreateReportInput, type ListMemoryFilters, type Memory,
-  type MemoryImage, type PlacementUpdateInput, type UpdateMemoryInput,
+  type CreateCommentInput, type CreateMemoryInput, type CreateReactionInput, type CreateReportInput, type ListMemoryFilters, type Memory,
+  type MemoryImage, type MemoryReaction, type PlacementUpdateInput, type UpdateMemoryInput,
 } from "@/domain/memory";
 
 export const DEFAULT_WALL_ID = "personal";
@@ -41,6 +41,9 @@ export interface MemoryStore {
   upsertActivity?(activity: ActivityNotification): Promise<void>;
   getActivityPreference?(userId: string): Promise<boolean>;
   setActivityPreference?(userId: string, enabled: boolean): Promise<void>;
+  getReaction?(memoryId: string, userId: string): Promise<MemoryReaction | null>;
+  upsertReaction?(reaction: MemoryReaction): Promise<void>;
+  deleteReaction?(memoryId: string, userId: string): Promise<void>;
 }
 
 function copy<T>(value: T): T { return structuredClone(value); }
@@ -60,6 +63,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   private readonly reports = new Map<string, ReportRecord>();
   private readonly activity = new Map<string, ActivityNotification>();
   private readonly activityPreferences = new Map<string, boolean>();
+  private readonly reactions = new Map<string, MemoryReaction>();
   async get(id: string) { return copy(this.memories.get(id) ?? null); }
   async list() { return copy([...this.memories.values()]); }
   async upsert(memory: Memory) { this.memories.set(memory.id, copy(memory)); }
@@ -84,6 +88,9 @@ export class InMemoryMemoryStore implements MemoryStore {
   async upsertActivity(activity: ActivityNotification) { this.activity.set(activity.id, copy(activity)); }
   async getActivityPreference(userId: string) { return this.activityPreferences.get(userId) ?? true; }
   async setActivityPreference(userId: string, enabled: boolean) { this.activityPreferences.set(userId, enabled); }
+  async getReaction(memoryId: string, userId: string) { return copy(this.reactions.get(`${memoryId}:${userId}`) ?? null); }
+  async upsertReaction(reaction: MemoryReaction) { this.reactions.set(`${reaction.memoryId}:${reaction.userId}`, copy(reaction)); }
+  async deleteReaction(memoryId: string, userId: string) { this.reactions.delete(`${memoryId}:${userId}`); }
 }
 
 export function defaultCoordinates(index: number): { freeform: Coordinate; snapped: Coordinate; rotation: number } {
@@ -97,6 +104,7 @@ export class MemoryRepository {
   private readonly fallbackReports = new Map<string, ReportRecord>();
   private readonly fallbackActivity = new Map<string, ActivityNotification>();
   private readonly fallbackActivityPreferences = new Map<string, boolean>();
+  private readonly fallbackReactions = new Map<string, MemoryReaction>();
 
   constructor(private readonly store: MemoryStore) {}
 
@@ -110,7 +118,7 @@ export class MemoryRepository {
     const now = new Date().toISOString();
     const memory = memorySchema.parse({
       id: randomUUID(), authorId: userId, title: data.title, reflection: data.reflection, category: data.category,
-      visibility: data.visibility, communityIds: data.visibility === "private" ? [] : data.communityIds,
+      visibility: data.visibility, communityIds: data.visibility === "selected-community" ? data.communityIds : [],
       createdAt: now, updatedAt: now, placements: { [wallId]: defaultCoordinates(existing.length) },
     });
     await this.store.upsert(memory);
@@ -135,7 +143,7 @@ export class MemoryRepository {
       const owned = memory.authorId === userId;
       if (ownership === "owned" && !owned) continue;
       if (ownership === "shared" && (owned || memory.visibility === "private")) continue;
-      if (ownership !== "owned" && !owned && memory.visibility !== "selected-community") continue;
+      if (ownership !== "owned" && !owned && memory.visibility === "private") continue;
       if (!owned && !(await this.canRead(memory, userId))) continue;
       if (category && memory.category !== category) continue;
       if (visibility && memory.visibility !== visibility) continue;
@@ -156,7 +164,7 @@ export class MemoryRepository {
     const communityIds = parsed.data.communityIds ?? current.communityIds;
     await this.assertCanShare(visibility, communityIds, userId);
     const next = memorySchema.parse({
-      ...current, ...parsed.data, visibility, communityIds: visibility === "private" ? [] : communityIds,
+      ...current, ...parsed.data, visibility, communityIds: visibility === "selected-community" ? communityIds : [],
       updatedAt: nextTimestamp(current.updatedAt),
     });
     await this.store.upsert(next); return copy(next);
@@ -174,6 +182,15 @@ export class MemoryRepository {
     return (await this.listMemoriesForUser(actorUserId, { ownership: "all" })).filter((memory) => memory.visibility === "selected-community");
   }
 
+  async listPublicMemoriesForUser(actorUserId: string, filters?: ListMemoryFilters): Promise<Memory[]> {
+    requireUser(actorUserId);
+    return this.listMemoriesForUser(actorUserId, { ...filters, ownership: "all", visibility: "public-discovery" });
+  }
+
+  async listPublicDiscoveryForUser(actorUserId: string, filters?: ListMemoryFilters): Promise<Memory[]> {
+    return this.listPublicMemoriesForUser(actorUserId, filters);
+  }
+
   async listCommunitiesForUser(actorUserId: string): Promise<CommunityMembership[]> {
     return this.membershipsFor(requireUser(actorUserId));
   }
@@ -183,6 +200,15 @@ export class MemoryRepository {
     const term = z.string().trim().min(1).max(120).safeParse(query);
     if (!term.success) throw new MemoryValidationError("A search term is required");
     const memories = (await this.listMemoriesForUser(actorUserId, { ...filters, ownership: filters?.ownership ?? "all" })).filter((memory) => memory.visibility === "selected-community");
+    const needle = term.data.toLocaleLowerCase();
+    return memories.filter((memory) => `${memory.title}\n${memory.reflection}`.toLocaleLowerCase().includes(needle));
+  }
+
+  async searchPublicMemoriesForUser(query: string, actorUserId: string, filters?: ListMemoryFilters): Promise<Memory[]> {
+    requireUser(actorUserId);
+    const term = z.string().trim().min(1).max(120).safeParse(query);
+    if (!term.success) throw new MemoryValidationError("A search term is required");
+    const memories = await this.listPublicMemoriesForUser(actorUserId, filters);
     const needle = term.data.toLocaleLowerCase();
     return memories.filter((memory) => `${memory.title}\n${memory.reflection}`.toLocaleLowerCase().includes(needle));
   }
@@ -202,6 +228,40 @@ export class MemoryRepository {
       await this.writeActivity(activitySchema.parse({ id: randomUUID(), userId: memory.authorId, memoryId: memory.id, kind: "comment", createdAt: comment.createdAt }));
     }
     return copy(comment);
+  }
+
+  async createReaction(input: CreateReactionInput, actorUserId: string): Promise<MemoryReaction> {
+    const userId = requireUser(actorUserId);
+    const parsed = createReactionSchema.safeParse(input);
+    if (!parsed.success) throw new MemoryValidationError(parsed.error.issues[0]?.message ?? "Invalid reaction");
+    const memory = await this.store.get(parsed.data.memoryId);
+    if (!memory) throw new MemoryNotFoundError("Memory not found");
+    if (!(await this.canReactTo(memory, userId))) throw new MemoryPermissionError("Reactions are available on shared memories only");
+    const existing = await this.readReaction(memory.id, userId);
+    if (existing) return copy(existing);
+    const reaction = reactionSchema.parse({ id: randomUUID(), memoryId: memory.id, userId, kind: "appreciate", createdAt: new Date().toISOString() });
+    await this.writeReaction(reaction);
+    return copy(reaction);
+  }
+
+  async removeReaction(memoryId: string, actorUserId: string): Promise<void> {
+    const userId = requireUser(actorUserId);
+    const parsed = z.string().min(1).safeParse(memoryId);
+    if (!parsed.success) throw new MemoryValidationError("A memory is required");
+    const memory = await this.store.get(parsed.data);
+    if (!memory) throw new MemoryNotFoundError("Memory not found");
+    if (!(await this.canReactTo(memory, userId))) throw new MemoryPermissionError("Reactions are available on shared memories only");
+    await this.deleteReaction(memory.id, userId);
+  }
+
+  async hasReaction(memoryId: string, actorUserId: string): Promise<boolean> {
+    const userId = requireUser(actorUserId);
+    const parsed = z.string().min(1).safeParse(memoryId);
+    if (!parsed.success) throw new MemoryValidationError("A memory is required");
+    const memory = await this.store.get(parsed.data);
+    if (!memory) throw new MemoryNotFoundError("Memory not found");
+    if (!(await this.canReactTo(memory, userId))) throw new MemoryPermissionError("Reactions are available on shared memories only");
+    return (await this.readReaction(memory.id, userId)) !== null;
   }
 
   async listComments(memoryId: string, actorUserId: string): Promise<MemoryComment[]> {
@@ -317,13 +377,14 @@ export class MemoryRepository {
 
   private async canRead(memory: Memory, userId: string): Promise<boolean> {
     if (memory.authorId === userId) return true;
+    if (memory.visibility === "public-discovery") return true;
     if (memory.visibility !== "selected-community") return false;
     const memberships = await this.membershipsFor(userId);
     return memory.communityIds.some((communityId) => memberships.some((membership) => membership.communityId === communityId));
   }
 
   private async assertCanShare(visibility: Memory["visibility"], communityIds: string[], userId: string): Promise<void> {
-    if (visibility === "private") return;
+    if (visibility !== "selected-community") return;
     if (!communityIds.length) throw new MemoryValidationError("Select at least one community to share this memory");
     const memberships = await this.membershipsFor(userId);
     const allowed = new Set(memberships.filter((membership) => membership.canShare).map((membership) => membership.communityId));
@@ -381,6 +442,25 @@ export class MemoryRepository {
     if (this.store.listActivity) return this.store.listActivity(userId);
     return copy([...this.fallbackActivity.values()].filter((item) => item.userId === userId));
   }
+
+  private async canReactTo(memory: Memory, userId: string): Promise<boolean> {
+    return (memory.visibility === "public-discovery" || memory.visibility === "selected-community") && await this.canRead(memory, userId);
+  }
+
+  private async readReaction(memoryId: string, userId: string): Promise<MemoryReaction | null> {
+    if (this.store.getReaction) return this.store.getReaction(memoryId, userId);
+    return copy(this.fallbackReactions.get(`${memoryId}:${userId}`) ?? null);
+  }
+
+  private async writeReaction(reaction: MemoryReaction): Promise<void> {
+    if (this.store.upsertReaction) await this.store.upsertReaction(reaction);
+    else this.fallbackReactions.set(`${reaction.memoryId}:${reaction.userId}`, copy(reaction));
+  }
+
+  private async deleteReaction(memoryId: string, userId: string): Promise<void> {
+    if (this.store.deleteReaction) await this.store.deleteReaction(memoryId, userId);
+    else this.fallbackReactions.delete(`${memoryId}:${userId}`);
+  }
 }
 
 export const demoUserId = "demo-user";
@@ -406,3 +486,8 @@ export const updateMemory = (id: string, input: UpdateMemoryInput, actorUserId: 
 export const deleteMemory = (id: string, actorUserId: string) => memoryRepository.deleteMemory(id, actorUserId);
 export const updateCardPlacement = (input: PlacementUpdateInput, actorUserId: string) => memoryRepository.updateCardPlacement(input, actorUserId);
 export const getWallPreference = (wallId: string, actorUserId: string) => memoryRepository.getWallPreference(wallId, actorUserId);
+export const listPublicMemoriesForUser = (actorUserId: string, filters?: ListMemoryFilters) => memoryRepository.listPublicMemoriesForUser(actorUserId, filters);
+export const searchPublicMemoriesForUser = (query: string, actorUserId: string, filters?: ListMemoryFilters) => memoryRepository.searchPublicMemoriesForUser(query, actorUserId, filters);
+export const createReaction = (input: CreateReactionInput, actorUserId: string) => memoryRepository.createReaction(input, actorUserId);
+export const removeReaction = (memoryId: string, actorUserId: string) => memoryRepository.removeReaction(memoryId, actorUserId);
+export const hasReaction = (memoryId: string, actorUserId: string) => memoryRepository.hasReaction(memoryId, actorUserId);

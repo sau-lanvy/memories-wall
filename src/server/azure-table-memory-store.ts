@@ -1,12 +1,13 @@
 import "server-only";
 
 import { TableClient, type TableEntity } from "@azure/data-tables";
-import { activitySchema, commentSchema, communityMembershipSchema, memorySchema, reportSchema, type ActivityNotification, type CommunityMembership, type Memory, type MemoryComment, type MemoryReport } from "@/domain/memory";
+import { activitySchema, commentSchema, communityMembershipSchema, memorySchema, reactionSchema, reportSchema, type ActivityNotification, type CommunityMembership, type Memory, type MemoryComment, type MemoryReaction, type MemoryReport } from "@/domain/memory";
 import type { MemoryStore } from "@/server/memory-repository";
 
 type MemoryEntity = TableEntity & { kind: "memory"; payload: string };
 type PreferenceEntity = TableEntity & { kind: "preference"; snapToGrid: boolean };
 type MembershipEntity = TableEntity & { kind: "membership"; payload: string };
+type ReactionEntity = TableEntity & { kind: "reaction"; payload: string };
 type PayloadEntity = TableEntity & { payload: string };
 
 /**
@@ -154,6 +155,31 @@ export class AzureTableMemoryStore implements MemoryStore {
   async setActivityPreference(userId: string, enabled: boolean): Promise<void> {
     await this.tableReady;
     await this.client.upsertEntity({ partitionKey: "activity-preferences", rowKey: userId, kind: "activity-preference", enabled }, "Replace");
+  }
+
+  async getReaction(memoryId: string, userId: string): Promise<MemoryReaction | null> {
+    await this.tableReady;
+    try {
+      const entity = await this.client.getEntity<ReactionEntity>(`reaction:${memoryId}`, encodeURIComponent(userId));
+      return reactionSchema.parse(JSON.parse(entity.payload));
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      throw error;
+    }
+  }
+
+  async upsertReaction(reaction: MemoryReaction): Promise<void> {
+    await this.tableReady;
+    await this.client.upsertEntity({ partitionKey: `reaction:${reaction.memoryId}`, rowKey: encodeURIComponent(reaction.userId), kind: "reaction", payload: JSON.stringify(reaction) }, "Replace");
+  }
+
+  async deleteReaction(memoryId: string, userId: string): Promise<void> {
+    await this.tableReady;
+    try {
+      await this.client.deleteEntity(`reaction:${memoryId}`, encodeURIComponent(userId));
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+    }
   }
 }
 

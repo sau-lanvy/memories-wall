@@ -3,11 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { memoryRepository, demoUserId, type MemoryRepository, MemoryPermissionError, MemoryNotFoundError, MemoryValidationError } from "@/server/memory-repository";
-import { createCommentSchema, createReportSchema, memoryCategorySchema, memoryImageSchema, reportReasonSchema, type ActivityNotification, type CommunityMembership, type Memory, type MemoryComment, type MemoryReport, type PlacementUpdateInput, type UpdateMemoryInput, type MemoryCategory } from "@/domain/memory";
+import { createCommentSchema, createReactionSchema, createReportSchema, memoryCategorySchema, memoryImageSchema, reportReasonSchema, type ActivityNotification, type CommunityMembership, type Memory, type MemoryComment, type MemoryReaction, type MemoryReport, type PlacementUpdateInput, type UpdateMemoryInput, type MemoryCategory } from "@/domain/memory";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string; code: "INVALID" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN" };
 export type WallData = { memories: Memory[]; snapToGrid: boolean };
 export type CommunityData = { memories: Memory[]; communities: CommunityMembership[] };
+export type ReactionState = { memoryId: string; reacted: boolean };
 const idSchema = z.string().min(1);
 
 function failure(error: unknown): ActionResult<never> {
@@ -34,7 +35,7 @@ export async function createMemoryAction(formData: FormData): Promise<ActionResu
     if (photo instanceof File && photo.size > 0 && (!memoryImageSchema.shape.mediaType.safeParse(photo.type).success || !z.number().int().positive().max(10_485_760).safeParse(photo.size).success)) {
       throw new MemoryValidationError("Images must be JPG, PNG, or WebP files no larger than 10 MB");
     }
-    const memory = await memoryRepository.createMemory({ title: text("title"), reflection: text("reflection"), category: text("category") as MemoryCategory, visibility: visibility as "private" | "selected-community", communityIds, wallId: "personal" }, demoUserId);
+    const memory = await memoryRepository.createMemory({ title: text("title"), reflection: text("reflection"), category: text("category") as MemoryCategory, visibility: visibility as "private" | "selected-community" | "public-discovery", communityIds, wallId: "personal" }, demoUserId);
     const image = photo instanceof File && photo.size > 0 ? await memoryRepository.attachImage(memory.id, { mediaType: photo.type, sizeBytes: photo.size }, demoUserId) : undefined;
     revalidatePath("/"); return { ok: true, data: image ? { ...memory, image } : memory };
   } catch (error) { return failure(error); }
@@ -77,9 +78,39 @@ export async function getRecentlyAddedAction(): Promise<ActionResult<Memory[]>> 
   catch (error) { return failure(error); }
 }
 
+export async function getPublicDiscoveryAction(): Promise<ActionResult<Memory[]>> {
+  try { return { ok: true, data: await memoryRepository.listPublicDiscoveryForUser(demoUserId) }; }
+  catch (error) { return failure(error); }
+}
+
 export async function searchMemoriesAction(query: string): Promise<ActionResult<Memory[]>> {
   try { return { ok: true, data: await memoryRepository.searchMemoriesForUser(query, demoUserId) }; }
   catch (error) { return failure(error); }
+}
+
+export async function searchPublicMemoriesAction(query: string): Promise<ActionResult<Memory[]>> {
+  try { return { ok: true, data: await memoryRepository.searchPublicMemoriesForUser(query, demoUserId) }; }
+  catch (error) { return failure(error); }
+}
+
+export async function getReactionAction(memoryId: string): Promise<ActionResult<ReactionState>> {
+  try { idSchema.parse(memoryId); return { ok: true, data: { memoryId, reacted: await memoryRepository.hasReaction(memoryId, demoUserId) } }; }
+  catch (error) { return failure(error); }
+}
+
+export async function createReactionAction(input: { memoryId: string }): Promise<ActionResult<MemoryReaction>> {
+  try {
+    const parsed = createReactionSchema.parse(input);
+    return { ok: true, data: await memoryRepository.createReaction(parsed, demoUserId) };
+  } catch (error) { return failure(error); }
+}
+
+export async function removeReactionAction(memoryId: string): Promise<ActionResult<ReactionState>> {
+  try {
+    idSchema.parse(memoryId);
+    await memoryRepository.removeReaction(memoryId, demoUserId);
+    return { ok: true, data: { memoryId, reacted: false } };
+  } catch (error) { return failure(error); }
 }
 
 export async function listCommentsAction(memoryId: string): Promise<ActionResult<MemoryComment[]>> {
