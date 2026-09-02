@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { createAzureTableMemoryStore } from "@/server/azure-table-memory-store";
 import { createAzureBlobImageUrlSigner } from "@/server/azure-blob-image-url-signer";
+import { createAzureBlobImageStorage } from "@/server/azure-blob-image-storage";
 import {
   activitySchema, commentSchema, coordinateSchema, createCommentSchema, createMemorySchema, createReactionSchema, createReportSchema,
   listMemoryFiltersSchema, memorySchema, memoryImageSchema, placementUpdateSchema, reportSchema,
@@ -19,8 +20,11 @@ export class MemoryPermissionError extends Error { readonly code = "FORBIDDEN" a
 export class MemoryValidationError extends Error { readonly code = "INVALID" as const; }
 
 type StoredPreference = { userId: string; wallId: string; snapToGrid: boolean };
-type ImageInput = { mediaType: string; sizeBytes: number };
+type ImageInput = { mediaType: string; sizeBytes: number; bytes?: Uint8Array };
 export type MemoryImageUrlSigner = { sign(storageKey: string): Promise<string> };
+export type MemoryImageStorage = {
+  upload(storageKey: string, bytes: Uint8Array, mediaType: string): Promise<void>;
+};
 export type CommentPage = { offset?: number; limit?: number };
 const COMMENT_PAGE_SIZE = 20;
 const COMMENT_RATE_WINDOW_MS = 60_000;
@@ -129,7 +133,11 @@ export class MemoryRepository {
   private readonly commentRateLimits = new Map<string, number[]>();
   private readonly fallbackPresentations = new Map<string, WallPresentation>();
 
-  constructor(private readonly store: MemoryStore, private readonly imageUrlSigner?: MemoryImageUrlSigner) {}
+  constructor(
+    private readonly store: MemoryStore,
+    private readonly imageUrlSigner?: MemoryImageUrlSigner,
+    private readonly imageStorage?: MemoryImageStorage,
+  ) {}
 
   private async decorateMemory(memory: Memory): Promise<Memory> {
     if (!this.imageUrlSigner || !memory.images?.length) return copy(memory);
@@ -378,7 +386,10 @@ export class MemoryRepository {
     const size = z.number().int().positive().max(10_485_760).safeParse(input.sizeBytes);
     if (!parsed.success || !size.success) throw new MemoryValidationError("Images must be JPG, PNG, or WebP files no larger than 10 MB");
     if ((memory.images ?? []).length >= 5) throw new MemoryValidationError("A memory can have up to 5 images");
-    const image = memoryImageSchema.parse({ id: randomUUID(), mediaType: parsed.data, sizeBytes: size.data, storageKey: `memory/${userId}/${randomUUID()}`, thumbnailKey: `memory/${userId}/thumbnails/${randomUUID()}`, uploadedAt: new Date().toISOString() });
+    if (this.imageStorage && (!input.bytes || input.bytes.byteLength !== size.data)) throw new MemoryValidationError("The image upload was incomplete. Please choose the image again.");
+    const storageKey = `memory/${userId}/${randomUUID()}`;
+    if (this.imageStorage && input.bytes) await this.imageStorage.upload(storageKey, input.bytes, parsed.data);
+    const image = memoryImageSchema.parse({ id: randomUUID(), mediaType: parsed.data, sizeBytes: size.data, storageKey, uploadedAt: new Date().toISOString() });
     await this.store.upsert(memorySchema.parse({ ...memory, images: [...(memory.images ?? []), image], updatedAt: nextTimestamp(memory.updatedAt) }));
     return copy(image);
   }
@@ -576,11 +587,17 @@ function configuredStore(): MemoryStore {
 
 function configuredImageUrlSigner(): MemoryImageUrlSigner | undefined {
   const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
-  const containerName = process.env.AZURE_BLOB_CONTAINER_NAME ?? process.env.AZURE_STORAGE_CONTAINER_NAME;
+  const containerName = process.env.AZURE_BLOB_CONTAINER_NAME ?? process.env.AZURE_STORAGE_CONTAINER_NAME ?? "memory-images";
   return connectionString && containerName ? createAzureBlobImageUrlSigner(connectionString, containerName) : undefined;
 }
 
-export const memoryRepository = new MemoryRepository(configuredStore(), configuredImageUrlSigner());
+function configuredImageStorage(): MemoryImageStorage | undefined {
+  const connectionString = process.env.AZURE_STORAGE_CONNECTION_STRING;
+  const containerName = process.env.AZURE_BLOB_CONTAINER_NAME ?? process.env.AZURE_STORAGE_CONTAINER_NAME ?? "memory-images";
+  return connectionString && containerName ? createAzureBlobImageStorage(connectionString, containerName) : undefined;
+}
+
+export const memoryRepository = new MemoryRepository(configuredStore(), configuredImageUrlSigner(), configuredImageStorage());
 
 // The module-level API is the single server-side seam used by actions and by
 // callers that do not need to select an adapter. Tests can use the class with

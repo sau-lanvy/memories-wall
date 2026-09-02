@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { memorySchema } from "@/domain/memory";
-import { InMemoryMemoryStore, MemoryPermissionError, MemoryRepository, MemoryValidationError, type MemoryImageUrlSigner } from "@/server/memory-repository";
+import { InMemoryMemoryStore, MemoryPermissionError, MemoryRepository, MemoryValidationError, type MemoryImageStorage, type MemoryImageUrlSigner } from "@/server/memory-repository";
 
 const userA = "alice";
 const userB = "bob";
@@ -185,7 +185,23 @@ describe("MemoryRepository", () => {
     const result = await repo.getMemory(item.id, userA);
 
     expect(result.images?.[0].url).toMatch(/^https:\/\/storage\.test\/memory\/alice\/.+\?sig=read$/);
-    expect(result.images?.[0].thumbnailUrl).toMatch(/^https:\/\/storage\.test\/memory\/alice\/thumbnails\/.+\?sig=read$/);
+    expect(result.images?.[0].thumbnailUrl).toBeUndefined();
+  });
+
+  it("uploads image bytes before persisting image metadata", async () => {
+    const uploads: Array<{ key: string; bytes: Uint8Array; mediaType: string }> = [];
+    const storage: MemoryImageStorage = {
+      upload: async (key, bytes, mediaType) => { uploads.push({ key, bytes, mediaType }); },
+    };
+    const store = new InMemoryMemoryStore();
+    const repo = new MemoryRepository(store, undefined, storage);
+    const item = await memory(repo);
+    const bytes = new Uint8Array([1, 2, 3]);
+
+    const image = await repo.attachImage(item.id, { mediaType: "image/png", sizeBytes: bytes.byteLength, bytes }, userA);
+
+    expect(uploads).toEqual([{ key: image.storageKey, bytes, mediaType: "image/png" }]);
+    expect((await repo.getMemory(item.id, userA)).images).toEqual([image]);
   });
 
   it("supports public discovery while keeping narrower memories out of it", async () => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { categoryMeta, MEMORY_CATEGORIES, type Coordinate, type Memory, type MemoryCategory, type MemorySizePreset, type WallTemplate } from "@/domain/memory";
-import { addMemoryImagesAction, removeMemoryImageAction, createCommentAction, createMemoryAction, createReactionAction, createReportAction, deleteCommentAction, deleteMemoryAction, getActivityAction, getAllMemoriesAction, getCommunityDataAction, getPublicDiscoveryAction, getReactionAction, getRecentlyAddedAction, listCommentsAction, moderateCommentAction, removeReactionAction, searchMemoriesAction, searchPublicMemoriesAction, setActivityPreferenceAction, updateMemoryAction, updatePlacementAction, listWallTemplatesAction, applyWallTemplateAction, undoTemplateApplicationAction, type WallData } from "@/server/actions";
+import { removeMemoryImageAction, createCommentAction, createMemoryAction, createReactionAction, createReportAction, deleteCommentAction, deleteMemoryAction, getActivityAction, getAllMemoriesAction, getCommunityDataAction, getPublicDiscoveryAction, getReactionAction, getRecentlyAddedAction, listCommentsAction, moderateCommentAction, removeReactionAction, searchMemoriesAction, searchPublicMemoriesAction, setActivityPreferenceAction, updateMemoryAction, updatePlacementAction, listWallTemplatesAction, applyWallTemplateAction, undoTemplateApplicationAction, type ActionResult, type WallData } from "@/server/actions";
 import type { ActivityNotification, CommunityMembership, MemoryComment, Visibility, MemoryImage } from "@/domain/memory";
 
 const STORAGE_KEY = "memories-wall:demo-user:personal";
@@ -174,8 +174,20 @@ export function WallApp({ initialData }: { initialData: WallData }) {
     void listCommentsAction(selected.id, nextOffset).then((result) => { if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; } setComments((current) => [...current, ...result.data]); setCommentsOffset(nextOffset); setCommentsCanLoadMore(result.data.length === 20); }).catch(() => setNotice({ kind: "error", text: "More comments could not be loaded." })).finally(() => setCommentsBusy(false));
   }
   function addImages(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (!selected) return; setCommentsBusy(true);
-    void addMemoryImagesAction(selected.id, new FormData(event.currentTarget)).then((result) => { if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; } setData((current) => ({ ...current, memories: current.memories.map((memory) => memory.id === result.data.id ? result.data : memory) })); setNotice({ kind: "success", text: "Images added to this memory." }); event.currentTarget.reset(); }).catch(() => setNotice({ kind: "error", text: "The images could not be added." })).finally(() => setCommentsBusy(false));
+    event.preventDefault(); if (!selected) return;
+    const form = event.currentTarget;
+    const input = form.querySelector<HTMLInputElement>('input[type="file"][name="photos"]');
+    const formData = new FormData();
+    for (const file of input?.files ?? []) formData.append("photos", file);
+    setCommentsBusy(true);
+    void fetch(`/api/memories/${encodeURIComponent(selected.id)}/images`, { method: "POST", body: formData })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Image upload request failed");
+        return response.json() as Promise<ActionResult<Memory>>;
+      })
+      .then((result) => { if (!result.ok) { setNotice({ kind: "error", text: result.error }); return; } setData((current) => ({ ...current, memories: current.memories.map((memory) => memory.id === result.data.id ? result.data : memory) })); setNotice({ kind: "success", text: "Images added to this memory." }); form.reset(); })
+      .catch(() => setNotice({ kind: "error", text: "The images could not be added." }))
+      .finally(() => setCommentsBusy(false));
   }
   function removeImage(imageId: string) {
     if (!selected) return; setCommentsBusy(true);
@@ -390,7 +402,9 @@ export function WallApp({ initialData }: { initialData: WallData }) {
 function ImageWithFallback({ image, alt, className, fullSize = false }: { image: MemoryImage; alt: string; className?: string; fullSize?: boolean }) {
   const [failed, setFailed] = useState(false);
   if (failed) return <div role="img" aria-label={`${alt} unavailable`} className={`${className ?? ""} image-placeholder`}>Image unavailable</div>;
-  return <img src={fullSize ? image.url ?? image.thumbnailUrl ?? image.storageKey : image.thumbnailUrl ?? image.url ?? image.thumbnailKey ?? image.storageKey} alt={alt} className={className} onError={() => setFailed(true)} />;
+  const source = fullSize ? image.url ?? image.thumbnailUrl : image.thumbnailUrl ?? image.url;
+  if (!source) return <div role="img" aria-label={`${alt} unavailable`} className={`${className ?? ""} image-placeholder`}>Image unavailable</div>;
+  return <img src={source} alt={alt} className={className} onError={() => setFailed(true)} />;
 }
 
 function MemoryCard({ memory, selected, dragging, snapToGrid, index, positionOverride, onSelect, onPointerDown }: { memory: Memory; selected: boolean; dragging: boolean; snapToGrid: boolean; index: number; positionOverride?: Coordinate; onSelect: () => void; onPointerDown: (event: ReactPointerEvent<HTMLElement>) => void }) {

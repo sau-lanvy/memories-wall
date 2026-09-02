@@ -22,10 +22,26 @@ describe("wall public behavior", () => { beforeEach(() => window.localStorage.cl
     render(<WallApp initialData={galleryData} />);
     fireEvent.click(screen.getByRole("button", { name: "A good beginning, Gratitude memory" }));
     expect(await screen.findByText("Image 1 of 2")).toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: /unavailable$/i }).length).toBeGreaterThan(0);
     await (await import("@testing-library/user-event")).default.setup().click(screen.getByRole("button", { name: "Next image" }));
     expect(screen.getByText("Image 2 of 2")).toBeInTheDocument();
   });
   it("exposes keyboard-friendly position controls after selecting a card", async () => { const user = (await import("@testing-library/user-event")).default.setup(); render(<WallApp initialData={base} />); await user.click(screen.getByRole("button", { name: "A good beginning, Gratitude memory" })); expect(screen.getByRole("button", { name: "Arrange this card" })).toBeInTheDocument(); await user.click(screen.getByRole("button", { name: "Arrange this card" })); expect(screen.getByRole("button", { name: "Move up" })).toBeInTheDocument(); expect(screen.getByRole("button", { name: "Confirm" })).toBeInTheDocument(); });
+  it("keeps existing-memory uploads successful through the multipart endpoint", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    const fetchMock = vi.fn<(...args: [RequestInfo | URL, RequestInit?]) => Promise<{ ok: boolean; json: () => Promise<{ ok: true; data: typeof base.memories[0] }> }>>(() => Promise.resolve({ ok: true, json: async () => ({ ok: true, data: base.memories[0] }) }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<WallApp initialData={base} />);
+    await user.click(screen.getByRole("button", { name: "A good beginning, Gratitude memory" }));
+    const input = screen.getByLabelText("Add images");
+    await user.upload(input, new File(["image"], "memory.png", { type: "image/png" }));
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/memories/one/images", expect.objectContaining({ method: "POST" }));
+    expect((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body).toBeInstanceOf(FormData);
+    expect(((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body as FormData).getAll("photos")).toHaveLength(1);
+    expect(await screen.findByRole("status")).toHaveTextContent("Images added to this memory.");
+    vi.unstubAllGlobals();
+  });
   it("offers a separate public discovery surface", () => { render(<WallApp initialData={base} />); expect(screen.getByRole("button", { name: "Public discovery" })).toBeInTheDocument(); });
   it("keeps a queued pointer move safe when the drag ends in the same event batch", async () => {
     const { container } = render(<WallApp initialData={base} />);
