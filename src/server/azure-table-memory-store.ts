@@ -1,11 +1,12 @@
 import "server-only";
 
 import { TableClient, type TableEntity } from "@azure/data-tables";
-import { activitySchema, commentSchema, communityMembershipSchema, memorySchema, reactionSchema, reportSchema, type ActivityNotification, type CommunityMembership, type Memory, type MemoryComment, type MemoryReaction, type MemoryReport } from "@/domain/memory";
+import { activitySchema, commentSchema, communityMembershipSchema, memorySchema, reactionSchema, reportSchema, wallPresentationSchema, type ActivityNotification, type CommunityMembership, type Memory, type MemoryComment, type MemoryReaction, type MemoryReport, type WallPresentation } from "@/domain/memory";
 import type { MemoryStore } from "@/server/memory-repository";
 
 type MemoryEntity = TableEntity & { kind: "memory"; payload: string };
 type PreferenceEntity = TableEntity & { kind: "preference"; snapToGrid: boolean };
+type WallPresentationEntity = TableEntity & { kind: "wall-presentation"; payload: string };
 type MembershipEntity = TableEntity & { kind: "membership"; payload: string };
 type ReactionEntity = TableEntity & { kind: "reaction"; payload: string };
 type PayloadEntity = TableEntity & { payload: string };
@@ -67,6 +68,23 @@ export class AzureTableMemoryStore implements MemoryStore {
   async setPreference({ userId, wallId, snapToGrid }: { userId: string; wallId: string; snapToGrid: boolean }): Promise<void> {
     await this.tableReady;
     const entity: PreferenceEntity = { partitionKey: `preference:${userId}`, rowKey: wallId, kind: "preference", snapToGrid };
+    await this.client.upsertEntity(entity, "Replace");
+  }
+
+  async getWallPresentation(userId: string, wallId: string): Promise<WallPresentation | null> {
+    await this.tableReady;
+    try {
+      const entity = await this.client.getEntity<WallPresentationEntity>(`wall:${userId}`, wallId);
+      return wallPresentationSchema.parse(JSON.parse(entity.payload));
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      throw error;
+    }
+  }
+
+  async setWallPresentation(presentation: WallPresentation): Promise<void> {
+    await this.tableReady;
+    const entity: WallPresentationEntity = { partitionKey: `wall:${presentation.userId}`, rowKey: presentation.wallId, kind: "wall-presentation", payload: JSON.stringify(presentation) };
     await this.client.upsertEntity(entity, "Replace");
   }
 

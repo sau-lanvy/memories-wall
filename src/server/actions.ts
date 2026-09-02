@@ -3,11 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { memoryRepository, demoUserId, type MemoryRepository, MemoryPermissionError, MemoryNotFoundError, MemoryValidationError } from "@/server/memory-repository";
-import { createCommentSchema, createReactionSchema, createReportSchema, memoryCategorySchema, memoryImageSchema, reportReasonSchema, type ActivityNotification, type CommunityMembership, type Memory, type WallTemplate, type MemoryComment, type MemoryReaction, type MemoryReport, type PlacementUpdateInput, type UpdateMemoryInput, type MemoryCategory } from "@/domain/memory";
+import { createCommentSchema, createReactionSchema, createReportSchema, memoryCategorySchema, memoryImageSchema, reportReasonSchema, type ActivityNotification, type CommunityMembership, type Memory, type WallTemplate, type MemoryComment, type MemoryReaction, type MemoryReport, type PlacementUpdateInput, type UpdateMemoryInput, type MemoryCategory, type WallBackgroundPreset } from "@/domain/memory";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string; code: "INVALID" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN" };
-export type WallData = { memories: Memory[]; snapToGrid: boolean };
-export type TemplateApplicationData = { memories: Memory[]; revision: number; template: WallTemplate };
+export type WallData = { memories: Memory[]; snapToGrid: boolean; backgroundPreset?: WallBackgroundPreset; templateId?: string; templateVersion?: number; templateRevision?: number; canUndoTemplate?: boolean };
+export type TemplateApplicationData = { memories: Memory[]; revision: number; template: WallTemplate; backgroundPreset: WallBackgroundPreset };
 export type CommunityData = { memories: Memory[]; communities: CommunityMembership[] };
 export type ReactionState = { memoryId: string; reacted: boolean };
 const idSchema = z.string().min(1);
@@ -23,7 +23,8 @@ export async function getWallData(category?: string): Promise<ActionResult<WallD
   try {
     const validCategory = category ? memoryCategorySchema.parse(category) : undefined;
     const memories = await memoryRepository.listMemoriesForUser(demoUserId, { category: validCategory, wallId: "personal" });
-    return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", demoUserId) } };
+    const presentation = await memoryRepository.getWallPresentation("personal", demoUserId);
+    return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", demoUserId), backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo) } };
   } catch (error) { return failure(error); }
 }
 
@@ -32,13 +33,13 @@ export async function createMemoryAction(formData: FormData): Promise<ActionResu
     const text = (name: string) => { const value = formData.get(name); return typeof value === "string" ? value : ""; };
     const visibility = text("visibility") || "private";
     const communityIds = text("communityIds").split(",").map((value) => value.trim()).filter(Boolean);
-    const photo = formData.get("photo");
-    if (photo instanceof File && photo.size > 0 && (!memoryImageSchema.shape.mediaType.safeParse(photo.type).success || !z.number().int().positive().max(10_485_760).safeParse(photo.size).success)) {
-      throw new MemoryValidationError("Images must be JPG, PNG, or WebP files no larger than 10 MB");
-    }
+    const photos = [...formData.getAll("photos"), ...formData.getAll("photo")].filter((value): value is File => value instanceof File && value.size > 0);
+    if (photos.length > 5) throw new MemoryValidationError("A memory can have up to 5 images");
+    for (const photo of photos) if (!memoryImageSchema.shape.mediaType.safeParse(photo.type).success || !z.number().int().positive().max(10_485_760).safeParse(photo.size).success) throw new MemoryValidationError("Images must be JPG, PNG, or WebP files no larger than 10 MB");
     const memory = await memoryRepository.createMemory({ title: text("title"), reflection: text("reflection"), category: text("category") as MemoryCategory, visibility: visibility as "private" | "selected-community" | "public-discovery", communityIds, wallId: "personal" }, demoUserId);
-    const image = photo instanceof File && photo.size > 0 ? await memoryRepository.attachImage(memory.id, { mediaType: photo.type, sizeBytes: photo.size }, demoUserId) : undefined;
-    revalidatePath("/"); return { ok: true, data: image ? { ...memory, image } : memory };
+    for (const photo of photos) await memoryRepository.attachImage(memory.id, { mediaType: photo.type, sizeBytes: photo.size }, demoUserId);
+    const saved = photos.length ? await memoryRepository.getMemory(memory.id, demoUserId) : memory;
+    revalidatePath("/"); return { ok: true, data: saved };
   } catch (error) { return failure(error); }
 }
 
@@ -60,7 +61,7 @@ export async function applyWallTemplateAction(input: { templateId: string; memor
   try { const result = await memoryRepository.applyWallTemplate({ ...input, wallId: "personal" }, demoUserId); revalidatePath("/"); return { ok: true, data: result }; } catch (error) { return failure(error); }
 }
 
-export async function undoTemplateApplicationAction(expectedRevision?: number): Promise<ActionResult<{ memories: Memory[]; revision: number }>> {
+export async function undoTemplateApplicationAction(expectedRevision?: number): Promise<ActionResult<{ memories: Memory[]; revision: number; backgroundPreset: WallBackgroundPreset; templateId?: string; templateVersion?: number }>> {
   try { const result = await memoryRepository.undoTemplateApplication("personal", demoUserId, expectedRevision); revalidatePath("/"); return { ok: true, data: result }; } catch (error) { return failure(error); }
 }
 
@@ -68,7 +69,8 @@ export async function updatePlacementAction(input: PlacementUpdateInput): Promis
   try {
     await memoryRepository.updateCardPlacement(input, demoUserId);
     const memories = await memoryRepository.listMemoriesForUser(demoUserId, { wallId: "personal" });
-    revalidatePath("/"); return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", demoUserId) } };
+    const presentation = await memoryRepository.getWallPresentation("personal", demoUserId);
+    revalidatePath("/"); return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", demoUserId), backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo) } };
   } catch (error) { return failure(error); }
 }
 
@@ -126,8 +128,8 @@ export async function removeReactionAction(memoryId: string): Promise<ActionResu
   } catch (error) { return failure(error); }
 }
 
-export async function listCommentsAction(memoryId: string): Promise<ActionResult<MemoryComment[]>> {
-  try { idSchema.parse(memoryId); return { ok: true, data: await memoryRepository.listComments(memoryId, demoUserId) }; }
+export async function listCommentsAction(memoryId: string, offset = 0): Promise<ActionResult<MemoryComment[]>> {
+  try { idSchema.parse(memoryId); return { ok: true, data: await memoryRepository.listComments(memoryId, demoUserId, { offset, limit: 20 }) }; }
   catch (error) { return failure(error); }
 }
 
@@ -171,6 +173,27 @@ export async function attachImageAction(memoryId: string, input: { mediaType: st
     revalidatePath("/");
     return { ok: true, data: memory };
   } catch (error) { return failure(error); }
+}
+
+export async function addMemoryImagesAction(memoryId: string, formData: FormData): Promise<ActionResult<Memory>> {
+  try {
+    idSchema.parse(memoryId);
+    const photos = formData.getAll("photos").filter((value): value is File => value instanceof File && value.size > 0);
+    if (!photos.length) throw new MemoryValidationError("Choose at least one image");
+    if (photos.length > 5) throw new MemoryValidationError("A memory can have up to 5 images");
+    const current = await memoryRepository.getMemory(memoryId, demoUserId);
+    if ((current.images ?? []).length + photos.length > 5) throw new MemoryValidationError("A memory can have up to 5 images");
+    for (const photo of photos) {
+      if (!memoryImageSchema.shape.mediaType.safeParse(photo.type).success || !z.number().int().positive().max(10_485_760).safeParse(photo.size).success) throw new MemoryValidationError("Images must be JPG, PNG, or WebP files no larger than 10 MB");
+      await memoryRepository.attachImage(memoryId, { mediaType: photo.type, sizeBytes: photo.size }, demoUserId);
+    }
+    const memory = await memoryRepository.getMemory(memoryId, demoUserId); revalidatePath("/"); return { ok: true, data: memory };
+  } catch (error) { return failure(error); }
+}
+
+export async function removeMemoryImageAction(memoryId: string, imageId: string): Promise<ActionResult<Memory>> {
+  try { idSchema.parse(memoryId); idSchema.parse(imageId); const memory = await memoryRepository.removeImage(memoryId, imageId, demoUserId); revalidatePath("/"); return { ok: true, data: memory }; }
+  catch (error) { return failure(error); }
 }
 
 export async function getActivityAction(): Promise<ActionResult<ActivityNotification[]>> {
