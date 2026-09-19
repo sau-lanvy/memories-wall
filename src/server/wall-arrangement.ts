@@ -1,6 +1,8 @@
 import {
+  decorationLayersSchema,
   memorySchema,
   type Coordinate,
+  type DecorationLayer,
   type Memory,
   type WallBackgroundPreset,
   type WallPresentation,
@@ -9,11 +11,11 @@ import {
 import { MemoryNotFoundError, MemoryValidationError } from "@/server/memory-repository-errors";
 
 export const WALL_TEMPLATES: WallTemplate[] = [
-  { id: "desk-grid", name: "Desk Grid", description: "A measured arrangement for a clear working wall.", previewAsset: "/templates/template-1.png", backgroundPreset: "linen", version: 1, published: true, slots: Array.from({ length: 6 }, (_, index) => ({ x: 10 + (index % 3) * 34, y: 12 + Math.floor(index / 3) * 42, rotation: (index % 2 ? 1 : -1) * 1.2, lane: (index < 3 ? "now" : "next") as "now" | "next" })) },
-  { id: "scattered-notes", name: "Scattered Notes", description: "A relaxed, overlapping composition for reflective browsing.", previewAsset: "/templates/template-2.png", backgroundPreset: "sage-paper", version: 1, published: true, slots: Array.from({ length: 5 }, (_, index) => ({ x: 12 + (index * 21) % 70, y: 12 + (index * 31) % 68, rotation: (index % 3 - 1) * 2, lane: (index < 2 ? "now" : index < 4 ? "next" : "later") as "now" | "next" | "later" })) },
-  { id: "three-lanes", name: "Three Lanes", description: "A simple Now, Next, and Later rhythm.", previewAsset: "/templates/template-3.png", backgroundPreset: "clay-paper", version: 1, published: true, slots: ["now", "next", "later"].map((lane, index) => ({ x: 16 + index * 34, y: 18, lane: lane as "now" | "next" | "later" })) },
-  { id: "quiet-corners", name: "Quiet Corners", description: "Room to let each reflection breathe.", previewAsset: "/templates/template-4.png", backgroundPreset: "blueprint-paper", version: 1, published: true, slots: [{ x: 12, y: 14, lane: "now" }, { x: 62, y: 16, lane: "next" }, { x: 24, y: 62, lane: "next" }, { x: 74, y: 64, lane: "later" }] },
-  { id: "archive-shelf", name: "Archive Shelf", description: "A dependable row-by-row archive composition.", previewAsset: "/templates/template-5.png", backgroundPreset: "linen", version: 1, published: true, slots: Array.from({ length: 8 }, (_, index) => ({ x: 8 + (index % 4) * 28, y: 15 + Math.floor(index / 4) * 52, lane: (index < 4 ? "now" : "later") as "now" | "later" })) },
+  { id: "desk-grid", name: "Desk Grid", description: "A measured arrangement for a clear working wall.", previewAsset: "/templates/template-1.png", backgroundPreset: "linen", visualTreatment: { scene: "warm-cabinet", motion: "breathe", intensity: 0.2 }, version: 1, published: true, slots: Array.from({ length: 6 }, (_, index) => ({ x: 10 + (index % 3) * 34, y: 12 + Math.floor(index / 3) * 42, rotation: (index % 2 ? 1 : -1) * 1.2, lane: (index < 3 ? "now" : "next") as "now" | "next" })) },
+  { id: "scattered-notes", name: "Scattered Notes", description: "A relaxed, overlapping composition for reflective browsing.", previewAsset: "/templates/template-2.png", backgroundPreset: "sage-paper", visualTreatment: { scene: "paper-drift", motion: "drift", intensity: 0.35 }, version: 1, published: true, slots: Array.from({ length: 5 }, (_, index) => ({ x: 12 + (index * 21) % 70, y: 12 + (index * 31) % 68, rotation: (index % 3 - 1) * 2, lane: (index < 2 ? "now" : index < 4 ? "next" : "later") as "now" | "next" | "later" })) },
+  { id: "three-lanes", name: "Three Lanes", description: "A simple Now, Next, and Later rhythm.", previewAsset: "/templates/template-3.png", backgroundPreset: "clay-paper", visualTreatment: { scene: "soft-constellation", motion: "float", intensity: 0.25 }, version: 1, published: true, slots: ["now", "next", "later"].map((lane, index) => ({ x: 16 + index * 34, y: 18, lane: lane as "now" | "next" | "later" })) },
+  { id: "quiet-corners", name: "Quiet Corners", description: "Room to let each reflection breathe.", previewAsset: "/templates/template-4.png", backgroundPreset: "blueprint-paper", visualTreatment: { scene: "botanical-light", motion: "breathe", intensity: 0.15 }, version: 1, published: true, slots: [{ x: 12, y: 14, lane: "now" }, { x: 62, y: 16, lane: "next" }, { x: 24, y: 62, lane: "next" }, { x: 74, y: 64, lane: "later" }] },
+  { id: "archive-shelf", name: "Archive Shelf", description: "A dependable row-by-row archive composition.", previewAsset: "/templates/template-5.png", backgroundPreset: "linen", visualTreatment: { scene: "blueprint-glow", motion: "still", intensity: 0 }, version: 1, published: true, slots: Array.from({ length: 8 }, (_, index) => ({ x: 8 + (index % 4) * 28, y: 15 + Math.floor(index / 4) * 52, lane: (index < 4 ? "now" : "later") as "now" | "later" })) },
 ];
 
 type ArrangementContext = {
@@ -45,7 +47,18 @@ export class WallArrangement {
       wallId,
       revision: 0,
       backgroundPreset: "neutral-texture",
+      decorationLayers: [],
     });
+  }
+
+  /** Decoration Layers are a live, user-controlled toggle: no revision bump, no undo, last write wins. */
+  async setDecorationLayers(wallId: string, userId: string, decorationLayers: DecorationLayer[]): Promise<WallPresentation> {
+    const key = `${userId}:${wallId}`;
+    const current = await this.getPresentation(wallId, userId);
+    const next: WallPresentation = { ...current, decorationLayers: decorationLayersSchema.parse(decorationLayers) };
+    this.fallbackPresentations.set(key, copy(next));
+    await this.context.savePresentation(next);
+    return copy(next);
   }
 
   async apply(input: { wallId?: string; templateId: string; memoryIds?: string[]; expectedRevision?: number }, userId: string) {
@@ -59,7 +72,10 @@ export class WallArrangement {
     }
     const visible = await this.context.listVisibleMemories(userId, wallId);
     const selected = input.memoryIds ? visible.filter((memory) => input.memoryIds!.includes(memory.id)) : visible;
-    const selectedForPersistence = selected.map((memory) => memorySchema.parse(memory));
+    const selectedForPersistence = selected.map((memory) => memorySchema.parse({
+      ...memory,
+      images: memory.images?.map(({ url: _url, thumbnailUrl: _thumbnailUrl, ...image }) => image),
+    }));
     this.undoSnapshots.set(key, { revision: previous.revision, memories: copy(selectedForPersistence) });
     const arranged = selectedForPersistence.map((memory, index) => {
       const hasSlot = index < template.slots.length;
@@ -90,6 +106,7 @@ export class WallArrangement {
       backgroundPreset: template.backgroundPreset,
       templateId: template.id,
       templateVersion: template.version,
+      decorationLayers: previous.decorationLayers,
       undo: {
         memories: copy(selectedForPersistence),
         backgroundPreset: previous.backgroundPreset,
@@ -114,7 +131,9 @@ export class WallArrangement {
       throw new MemoryValidationError("This wall changed elsewhere. Refresh before undoing.");
     }
     if (current.revision < 1 || !current.undo) throw new MemoryNotFoundError("There is no template application to undo.");
-    const memoriesToRestore = this.undoSnapshots.get(key)?.memories ?? current.undo.memories;
+    const snapshot = this.undoSnapshots.get(key)?.memories ?? current.undo.memories;
+    const visibleIds = new Set((await this.context.listVisibleMemories(userId, wallId)).map((memory) => memory.id));
+    const memoriesToRestore = snapshot.filter((memory) => visibleIds.has(memory.id));
     for (const memory of memoriesToRestore) await this.context.saveMemory(memory);
     const restored: WallPresentation = {
       userId,
@@ -123,6 +142,7 @@ export class WallArrangement {
       backgroundPreset: current.undo.backgroundPreset,
       templateId: current.undo.templateId,
       templateVersion: current.undo.templateVersion,
+      decorationLayers: current.decorationLayers,
     };
     this.fallbackPresentations.set(key, copy(restored));
     await this.context.savePresentation(restored);

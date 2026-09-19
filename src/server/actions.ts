@@ -5,10 +5,10 @@ import { cookies } from "next/headers";
 import { z } from "zod";
 import { authService, SessionError } from "@/server/auth";
 import { memoryRepository, type MemoryRepository, MemoryPermissionError, MemoryNotFoundError, MemoryValidationError } from "@/server/memory-repository";
-import { createCommentSchema, createReactionSchema, createReportSchema, memoryCategorySchema, memoryImageSchema, reportReasonSchema, type ActivityNotification, type CommunityMembership, type Memory, type WallTemplate, type MemoryComment, type MemoryReaction, type MemoryReport, type PlacementUpdateInput, type UpdateMemoryInput, type MemoryCategory, type WallBackgroundPreset } from "@/domain/memory";
+import { createCommentSchema, createReactionSchema, createReportSchema, memoryCategorySchema, memoryImageSchema, reportReasonSchema, type ActivityNotification, type CommunityMembership, type Memory, type WallTemplate, type MemoryComment, type MemoryReaction, type MemoryReport, type PlacementUpdateInput, type UpdateMemoryInput, type MemoryCategory, type WallBackgroundPreset, type DecorationLayer } from "@/domain/memory";
 
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string; code: "INVALID" | "NOT_FOUND" | "FORBIDDEN" | "UNKNOWN" };
-export type WallData = { memories: Memory[]; snapToGrid: boolean; backgroundPreset?: WallBackgroundPreset; templateId?: string; templateVersion?: number; templateRevision?: number; canUndoTemplate?: boolean };
+export type WallData = { memories: Memory[]; snapToGrid: boolean; userId?: string; backgroundPreset?: WallBackgroundPreset; templateId?: string; templateVersion?: number; templateRevision?: number; canUndoTemplate?: boolean; decorationLayers?: DecorationLayer[] };
 export type TemplateApplicationData = { memories: Memory[]; revision: number; template: WallTemplate; backgroundPreset: WallBackgroundPreset };
 export type CommunityData = { memories: Memory[]; communities: CommunityMembership[] };
 export type ReactionState = { memoryId: string; reacted: boolean };
@@ -42,7 +42,7 @@ export async function getWallData(category?: string): Promise<ActionResult<WallD
     const validCategory = category ? memoryCategorySchema.parse(category) : undefined;
     const memories = await memoryRepository.listMemoriesForUser(userId, { category: validCategory, wallId: "personal" });
     const presentation = await memoryRepository.getWallPresentation("personal", userId);
-    return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", userId), backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo) } };
+    return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", userId), userId, backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo), decorationLayers: presentation.decorationLayers } };
   } catch (error) { return failure(error); }
 }
 
@@ -84,13 +84,22 @@ export async function undoTemplateApplicationAction(expectedRevision?: number): 
   try { const userId = await currentUserId(); const result = await memoryRepository.undoTemplateApplication("personal", userId, expectedRevision); revalidatePath("/"); return { ok: true, data: result }; } catch (error) { return failure(error); }
 }
 
+export async function setDecorationLayersAction(decorationLayers: DecorationLayer[]): Promise<ActionResult<{ decorationLayers: DecorationLayer[] }>> {
+  try {
+    const userId = await currentUserId();
+    const presentation = await memoryRepository.setDecorationLayers("personal", userId, decorationLayers);
+    revalidatePath("/");
+    return { ok: true, data: { decorationLayers: presentation.decorationLayers } };
+  } catch (error) { return failure(error); }
+}
+
 export async function updatePlacementAction(input: PlacementUpdateInput): Promise<ActionResult<WallData>> {
   try {
     const userId = await currentUserId();
     await memoryRepository.updateCardPlacement(input, userId);
     const memories = await memoryRepository.listMemoriesForUser(userId, { wallId: "personal" });
     const presentation = await memoryRepository.getWallPresentation("personal", userId);
-    revalidatePath("/"); return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", userId), backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo) } };
+    revalidatePath("/"); return { ok: true, data: { memories, snapToGrid: await memoryRepository.getWallPreference("personal", userId), userId, backgroundPreset: presentation.backgroundPreset, templateId: presentation.templateId, templateVersion: presentation.templateVersion, templateRevision: presentation.revision, canUndoTemplate: Boolean(presentation.undo), decorationLayers: presentation.decorationLayers } };
   } catch (error) { return failure(error); }
 }
 
