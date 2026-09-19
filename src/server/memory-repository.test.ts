@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { memorySchema } from "@/domain/memory";
+import { memorySchema, wallPresentationSchema } from "@/domain/memory";
 import { InMemoryMemoryStore, MemoryPermissionError, MemoryRepository, MemoryValidationError, type MemoryImageStorage, type MemoryImageUrlSigner } from "@/server/memory-repository";
 
 const userA = "alice";
@@ -8,6 +8,17 @@ async function repository() { return new MemoryRepository(new InMemoryMemoryStor
 async function memory(repo: MemoryRepository, title = "A quiet morning") { return repo.createMemory({ title, reflection: "The light was soft and I noticed it.", category: "gratitude", visibility: "private", wallId: "personal" }, userA); }
 
 describe("MemoryRepository", () => {
+  it("normalizes decoration layers saved by the previous catalog", () => {
+    const presentation = wallPresentationSchema.parse({
+      wallId: "personal",
+      userId: userA,
+      revision: 1,
+      backgroundPreset: "linen",
+      decorationLayers: ["dust-motes", "falling-petals"],
+    });
+    expect(presentation.decorationLayers).toEqual(["photo-collage", "autumn"]);
+  });
+
   it("applies published templates deterministically and preserves size and image metadata", async () => {
     const repo = await repository(); const first = await memory(repo, "First"); const second = await memory(repo, "Second");
     await repo.updateCardPlacement({ memoryId: first.id, sizePreset: "large" }, userA);
@@ -157,7 +168,8 @@ describe("MemoryRepository", () => {
     await repo.createMemory({ title: "Private light", reflection: "Not for others", category: "growth", visibility: "private", wallId: "personal" }, userA);
 
     expect((await repo.searchMemoriesForUser("LIGHT", userB)).map((entry) => entry.id)).toEqual([shared.id]);
-    expect((await repo.searchMemoriesForUser("LIGHT", userA)).map((entry) => entry.id)).toEqual([shared.id]);
+    expect((await repo.searchMemoriesForUser("LIGHT", userA)).map((entry) => entry.id)).toEqual(expect.arrayContaining([shared.id]));
+    expect((await repo.searchMemoriesForUser("LIGHT", userA)).some((entry) => entry.title === "Private light")).toBe(true);
   });
 
   it("searches public discovery without exposing selected-community or private memories", async () => {

@@ -50,6 +50,10 @@ _Avoid_: Latest template, live theme
 The saved visual treatment and applied template version for a Wall, distinct from the Memories and their Arrangement.
 _Avoid_: Wall content, display settings
 
+**Decoration Layer**:
+A user-toggled, purely additive visual flourish drawn over a Wall's current Template Visual Treatment without altering it. Chosen from a fixed, published catalog, several may be active at once (bounded), and each is a simple on/off with no preview, undo, or intensity control. Selected Decoration Layers persist across Template Applications.
+_Avoid_: Effect, effect preset, decoration
+
 ## Identity and access
 
 **User**:

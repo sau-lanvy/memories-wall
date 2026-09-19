@@ -14,7 +14,7 @@ import {
   reactionSchema, updateMemorySchema, type ActivityNotification, type CommunityMembership, type Coordinate,
   type MemoryComment,
   type CreateCommentInput, type CreateMemoryInput, type CreateReactionInput, type CreateReportInput, type ListMemoryFilters, type Memory,
-  type MemoryImage, type MemoryReaction, type MemorySizePreset, type WallTemplate, type PlacementUpdateInput, type UpdateMemoryInput, type WallPresentation, type WallBackgroundPreset,
+  type MemoryImage, type MemoryReaction, type MemorySizePreset, type WallTemplate, type PlacementUpdateInput, type UpdateMemoryInput, type WallPresentation, type WallBackgroundPreset, type DecorationLayer,
 } from "@/domain/memory";
 
 export const DEFAULT_WALL_ID = "personal";
@@ -251,7 +251,7 @@ export class MemoryRepository {
     requireUser(actorUserId);
     const term = z.string().trim().min(1).max(120).safeParse(query);
     if (!term.success) throw new MemoryValidationError("A search term is required");
-    const memories = (await this.listMemoriesForUser(actorUserId, { ...filters, ownership: filters?.ownership ?? "all" })).filter((memory) => memory.visibility === "selected-community");
+    const memories = await this.listMemoriesForUser(actorUserId, { ...filters, ownership: filters?.ownership ?? "all" });
     const needle = term.data.toLocaleLowerCase();
     return memories.filter((memory) => `${memory.title}\n${memory.reflection}`.toLocaleLowerCase().includes(needle));
   }
@@ -423,6 +423,9 @@ export class MemoryRepository {
   }
   async undoTemplateApplication(wallId: string, actorUserId: string, expectedRevision?: number): Promise<{ memories: Memory[]; revision: number; backgroundPreset: WallBackgroundPreset; templateId?: string; templateVersion?: number }> {
     return this.arrangement.undo(wallId, requireUser(actorUserId), expectedRevision);
+  }
+  async setDecorationLayers(wallId: string, actorUserId: string, decorationLayers: DecorationLayer[]): Promise<WallPresentation> {
+    return this.arrangement.setDecorationLayers(wallId, requireUser(actorUserId), decorationLayers);
   }
 
   async updateCardPlacement(input: PlacementUpdateInput, actorUserId: string): Promise<{ memory: Memory; snapToGrid: boolean }> {

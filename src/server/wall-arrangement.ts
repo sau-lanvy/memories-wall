@@ -1,6 +1,8 @@
 import {
+  decorationLayersSchema,
   memorySchema,
   type Coordinate,
+  type DecorationLayer,
   type Memory,
   type WallBackgroundPreset,
   type WallPresentation,
@@ -45,7 +47,18 @@ export class WallArrangement {
       wallId,
       revision: 0,
       backgroundPreset: "neutral-texture",
+      decorationLayers: [],
     });
+  }
+
+  /** Decoration Layers are a live, user-controlled toggle: no revision bump, no undo, last write wins. */
+  async setDecorationLayers(wallId: string, userId: string, decorationLayers: DecorationLayer[]): Promise<WallPresentation> {
+    const key = `${userId}:${wallId}`;
+    const current = await this.getPresentation(wallId, userId);
+    const next: WallPresentation = { ...current, decorationLayers: decorationLayersSchema.parse(decorationLayers) };
+    this.fallbackPresentations.set(key, copy(next));
+    await this.context.savePresentation(next);
+    return copy(next);
   }
 
   async apply(input: { wallId?: string; templateId: string; memoryIds?: string[]; expectedRevision?: number }, userId: string) {
@@ -93,6 +106,7 @@ export class WallArrangement {
       backgroundPreset: template.backgroundPreset,
       templateId: template.id,
       templateVersion: template.version,
+      decorationLayers: previous.decorationLayers,
       undo: {
         memories: copy(selectedForPersistence),
         backgroundPreset: previous.backgroundPreset,
@@ -128,6 +142,7 @@ export class WallArrangement {
       backgroundPreset: current.undo.backgroundPreset,
       templateId: current.undo.templateId,
       templateVersion: current.undo.templateVersion,
+      decorationLayers: current.decorationLayers,
     };
     this.fallbackPresentations.set(key, copy(restored));
     await this.context.savePresentation(restored);

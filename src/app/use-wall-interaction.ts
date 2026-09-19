@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type PointerEvent as ReactPointerEvent } from "react";
 import { type Coordinate, type Memory, type MemoryCategory, type MemorySizePreset, type WallTemplate } from "@/domain/memory";
-import { removeMemoryImageAction, createCommentAction, createMemoryAction, createReactionAction, createReportAction, deleteCommentAction, deleteMemoryAction, getActivityAction, getAllMemoriesAction, getCommunityDataAction, getPublicDiscoveryAction, getReactionAction, getRecentlyAddedAction, listCommentsAction, moderateCommentAction, removeReactionAction, searchMemoriesAction, searchPublicMemoriesAction, setActivityPreferenceAction, updateMemoryAction, updatePlacementAction, listWallTemplatesAction, applyWallTemplateAction, undoTemplateApplicationAction, type ActionResult, type WallData } from "@/server/actions";
-import type { ActivityNotification, CommunityMembership, MemoryComment, Visibility } from "@/domain/memory";
+import { removeMemoryImageAction, createCommentAction, createMemoryAction, createReactionAction, createReportAction, deleteCommentAction, deleteMemoryAction, getActivityAction, getAllMemoriesAction, getCommunityDataAction, getPublicDiscoveryAction, getReactionAction, getRecentlyAddedAction, listCommentsAction, moderateCommentAction, removeReactionAction, searchMemoriesAction, searchPublicMemoriesAction, setActivityPreferenceAction, setDecorationLayersAction, updateMemoryAction, updatePlacementAction, listWallTemplatesAction, applyWallTemplateAction, undoTemplateApplicationAction, type ActionResult, type WallData } from "@/server/actions";
+import { MAX_ACTIVE_DECORATION_LAYERS, type ActivityNotification, type CommunityMembership, type DecorationLayer, type MemoryComment, type Visibility } from "@/domain/memory";
 
 const STORAGE_KEY = "memories-wall:demo-user:personal";
 const initialForm = { title: "", reflection: "", category: "gratitude" as MemoryCategory, visibility: "private" as Visibility, communityIds: "" };
@@ -64,6 +64,8 @@ export function useWallInteraction({ initialData }: { initialData: WallData }) {
   const [backgroundPreset, setBackgroundPreset] = useState(initialData.backgroundPreset ?? "neutral-texture");
   const [activeTemplateId, setActiveTemplateId] = useState(initialData.templateId);
   const [canUndoTemplate, setCanUndoTemplate] = useState(initialData.canUndoTemplate ?? false);
+  const [decorationLayers, setDecorationLayers] = useState<DecorationLayer[]>(initialData.decorationLayers ?? []);
+  const [decorationLayersBusy, setDecorationLayersBusy] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [commentsOpen, setCommentsOpen] = useState(true);
   const [recentOpen, setRecentOpen] = useState(false);
@@ -72,6 +74,9 @@ export function useWallInteraction({ initialData }: { initialData: WallData }) {
   const selectedIdRef = useRef<string | null>(null);
   const composerTitleRef = useRef<HTMLInputElement>(null);
   const composerReturnFocusRef = useRef<HTMLElement | null>(null);
+  const skipNextSurfaceLoadRef = useRef(false);
+  const searchTimerRef = useRef<number | null>(null);
+  const searchRequestRef = useRef(0);
 
   useEffect(() => {
     // The server snapshot is authoritative. localStorage is only a non-authoritative
@@ -83,12 +88,16 @@ export function useWallInteraction({ initialData }: { initialData: WallData }) {
   const displayedMemories = surfaceMemories ?? data.memories;
   const selected = displayedMemories.find((memory) => memory.id === selectedId) ?? null;
   const visibleMemories = useMemo(() => displayedMemories.filter((memory) => (category === "all" || memory.category === category) && (ownershipFilter === "all" || ownershipFilter === "mine" ? memory.authorId === ownerId : memory.authorId !== ownerId) && (visibilityFilter === "all" || memory.visibility === visibilityFilter) && (!fromDate || memory.createdAt.slice(0, 10) >= fromDate) && (!toDate || memory.createdAt.slice(0, 10) <= toDate)), [displayedMemories, category, ownershipFilter, visibilityFilter, fromDate, toDate, ownerId]);
-  const isEmpty = displayedMemories.length === 0;
+  const isEmpty = visibleMemories.length === 0;
   const isOwnedView = view === "wall" || view === "mine";
   const selectedIsOwned = selected?.authorId === ownerId;
   selectedIdRef.current = selectedId;
 
   useEffect(() => {
+    if (skipNextSurfaceLoadRef.current) {
+      skipNextSurfaceLoadRef.current = false;
+      return;
+    }
     if (isOwnedView) { setSurfaceMemories(null); setSurfaceError(null); setSurfaceErrorCode(null); return; }
     setSurfaceLoading(true); setSurfaceError(null); setSurfaceErrorCode(null);
     void (async () => {
@@ -102,6 +111,39 @@ export function useWallInteraction({ initialData }: { initialData: WallData }) {
       setSurfaceMemories(result.data);
     })().catch(() => { setSurfaceError("This surface could not be loaded. Please try again."); setSurfaceErrorCode("UNKNOWN"); }).finally(() => setSurfaceLoading(false));
   }, [view, communityId, isOwnedView, surfaceRequestKey]);
+
+  function searchSurface(query: string, targetView: Extract<View, "all" | "discovery">) {
+    if (searchTimerRef.current !== null) window.clearTimeout(searchTimerRef.current);
+    skipNextSurfaceLoadRef.current = view !== targetView;
+    setView(targetView);
+    setSurfaceError(null);
+    setSurfaceErrorCode(null);
+    if (!query.trim()) {
+      searchRequestRef.current += 1;
+      setSurfaceLoading(false);
+      setSurfaceMemories(null);
+      return;
+    }
+    setSurfaceLoading(true);
+    const requestId = ++searchRequestRef.current;
+    searchTimerRef.current = window.setTimeout(() => {
+      const request = targetView === "discovery" ? searchPublicMemoriesAction(query) : searchMemoriesAction(query);
+      void request.then((result) => {
+        if (requestId !== searchRequestRef.current) return;
+        if (result.ok) setSurfaceMemories(result.data);
+        else {
+          setSurfaceError(result.error);
+          setSurfaceErrorCode(result.code === "FORBIDDEN" ? "FORBIDDEN" : "UNKNOWN");
+        }
+      }).catch(() => {
+        if (requestId !== searchRequestRef.current) return;
+        setSurfaceError("This search could not be completed. Please try again.");
+        setSurfaceErrorCode("UNKNOWN");
+      }).finally(() => {
+        if (requestId === searchRequestRef.current) setSurfaceLoading(false);
+      });
+    }, 250);
+  }
 
   useEffect(() => {
     if (!selected) { setComments([]); setCommentsOffset(0); setCommentsCanLoadMore(false); setReacted(false); return; }
@@ -275,6 +317,23 @@ export function useWallInteraction({ initialData }: { initialData: WallData }) {
     }).catch(() => setNotice({ kind: "error", text: "The arrangement could not be restored. Please try again." })).finally(() => setBusy(false));
   }
 
+  /** Live, instant toggle: no preview, no undo — flipping it back off is its own undo. */
+  function toggleDecorationLayer(layer: DecorationLayer) {
+    if (!isOwnedView || decorationLayersBusy) return;
+    const isActive = decorationLayers.includes(layer);
+    if (!isActive && decorationLayers.length >= MAX_ACTIVE_DECORATION_LAYERS) {
+      setNotice({ kind: "error", text: `You can have up to ${MAX_ACTIVE_DECORATION_LAYERS} effects active at once.` });
+      return;
+    }
+    const previous = decorationLayers;
+    const next = isActive ? decorationLayers.filter((item) => item !== layer) : [...decorationLayers, layer];
+    setDecorationLayers(next); setDecorationLayersBusy(true);
+    void setDecorationLayersAction(next).then((result) => {
+      if (!result.ok) { setDecorationLayers(previous); setNotice({ kind: "error", text: result.error }); return; }
+      setDecorationLayers(result.data.decorationLayers);
+    }).catch(() => { setDecorationLayers(previous); setNotice({ kind: "error", text: "That effect could not be saved. Please try again." }); }).finally(() => setDecorationLayersBusy(false));
+  }
+
   function toggleSnap() {
     if (!data.memories.length) return;
     const next = !data.snapToGrid; setBusy(true);
@@ -335,13 +394,13 @@ export function useWallInteraction({ initialData }: { initialData: WallData }) {
       setPositionMode, comments, commentDraft, setCommentDraft, commentsBusy, commentsOffset, commentsCanLoadMore, reacted,
       reactionBusy, reportReason, setReportReason, activityEnabled, dragId, templates, templateId, setTemplateId, templateRevision,
       templatePreview, setTemplatePreview, templateVersion, backgroundPreset, activeTemplateId, canUndoTemplate, sidebarOpen, setSidebarOpen,
-      commentsOpen, setCommentsOpen, recentOpen, setRecentOpen,
+      commentsOpen, setCommentsOpen, recentOpen, setRecentOpen, decorationLayers, decorationLayersBusy,
     },
     actions: {
       selectMemory, openComposer, closeComposer, onCreate, beginEdit, saveEdit, submitComment, loadMoreComments, addImages,
       removeImage, removeComment, moderateCommentFromWall, reportContent, toggleReaction, toggleActivity, deleteSelected,
       persistPlacement, changeSize, applyTemplate, undoTemplate, toggleSnap, onPointerDown, onPointerMove, onPointerUp,
-      startPositionMode, movePosition, confirmPosition,
+      startPositionMode, movePosition, confirmPosition, toggleDecorationLayer, searchSurface,
     },
     refs: { canvasRef, composerTitleRef },
   };
