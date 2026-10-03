@@ -53,6 +53,64 @@ export function threadPaths(points: ThreadPoint[]) {
   return paths;
 }
 
+type Box = { left: number; top: number; width: number; height: number };
+
+/** Transform that makes the opened book (`to`) look like the card it grew from (`from`): the start of the FLIP. */
+export function flipFromRect(from: Box, to: Box) {
+  const scale = from.width > 0 && to.width > 0 ? clamp(from.width / to.width, 0.1, 1) : 1;
+  return {
+    x: from.left + from.width / 2 - (to.left + to.width / 2),
+    y: from.top + from.height / 2 - (to.top + to.height / 2),
+    scale,
+  };
+}
+
+/** The neighbouring id in reading order, wrapping around; null when there is nowhere to turn. */
+export function adjacentId(ids: string[], currentId: string, direction: 1 | -1) {
+  const index = ids.indexOf(currentId);
+  if (index < 0 || ids.length < 2) return null;
+  return ids[(index + direction + ids.length) % ids.length];
+}
+
+/** Next card to spotlight while the wall idles. */
+export function nextSpotlightId(ids: string[], currentId: string | null) {
+  if (!ids.length) return null;
+  const index = currentId ? ids.indexOf(currentId) : -1;
+  return ids[(index + 1) % ids.length];
+}
+
+const DAY = 86_400_000;
+const dayNumber = (date: Date) => Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY);
+const REVISIT_AFTER_DAYS = 30;
+
+/** One older memory to resurface today: a same-date anniversary if there is one, else a stable pick for the day. */
+export function memoryOfTheDay(memories: { id: string; createdAt: string }[], now: Date) {
+  const today = dayNumber(now);
+  const dated = memories
+    .map((memory) => ({ id: memory.id, written: new Date(memory.createdAt) }))
+    .filter((memory) => !Number.isNaN(memory.written.getTime()))
+    .map((memory) => ({ ...memory, daysAgo: today - dayNumber(memory.written) }))
+    .sort((a, b) => b.daysAgo - a.daysAgo || a.id.localeCompare(b.id));
+  const anniversary = dated.find((memory) => memory.written.getFullYear() < now.getFullYear() && memory.written.getMonth() === now.getMonth() && memory.written.getDate() === now.getDate());
+  if (anniversary) return { id: anniversary.id, daysAgo: anniversary.daysAgo, anniversary: true };
+  const eligible = dated.filter((memory) => memory.daysAgo >= REVISIT_AFTER_DAYS);
+  if (!eligible.length) return null;
+  const pick = eligible[(now.getFullYear() * 372 + now.getMonth() * 31 + now.getDate()) % eligible.length];
+  return { id: pick.id, daysAgo: pick.daysAgo, anniversary: false };
+}
+
+const plural = (count: number, unit: string) => `${count} ${unit}${count === 1 ? "" : "s"}`;
+
+/** Ribbon text for a resurfaced memory. */
+export function describeAge({ daysAgo, anniversary }: { daysAgo: number; anniversary: boolean }) {
+  if (anniversary) return `On this day, ${plural(Math.round(daysAgo / 365), "year")} ago`;
+  if (daysAgo < 60) return `From ${plural(daysAgo, "day")} ago`;
+  if (daysAgo < 365) return `From ${plural(Math.round(daysAgo / 30), "month")} ago`;
+  return `From ${plural(Math.round(daysAgo / 365), "year")} ago`;
+}
+
+export const prefersReducedMotion = () => typeof window !== "undefined" && Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)").matches);
+
 const canAnimate = (el: Element): el is HTMLElement => typeof (el as HTMLElement).animate === "function";
 
 /** Damped pendulum swing layered on top of the card's idle sway. */

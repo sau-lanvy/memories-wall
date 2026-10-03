@@ -34,6 +34,18 @@ _Avoid_: Theme, decoration, effect preset
 A bounded named motion behavior, such as still, breathe, float, drift, or constellation, that controls ambient movement and transitions in a Wall Template.
 _Avoid_: Animation config, Three.js effect, motion parameter
 
+**Book Reading Mode**:
+On wide screens, selecting a memory opens it as a journal that flies from its card and flips open: the left page shows the title, category and photo, the right page the details, and ←/→ turn to neighbouring memories. Narrow screens and card arrangement keep the side panel. It is presentation only and never changes memory content.
+_Avoid_: Modal, lightbox, detail page
+
+**Scene Change**:
+The brief transition when a Template Application moves cards and swaps the background and scene. Each Wall Template also draws an ambient particle scene (paper fibres, embers, stars, pollen, lattice) that follows its scene and the pointer. Calm motion and reduced motion turn these off.
+_Avoid_: Theme switch, page transition
+
+**Memory of the Day**:
+A memory resurfaced on the wall, preferring the anniversary of the day it was pinned, otherwise a stable pick of a memory at least 30 days old. After a quiet spell the wall also lifts one memory at a time into the light (idle spotlight).
+_Avoid_: Recommendation, notification
+
 **Presentation Lane**:
 A visual region such as Now, Next, or Later used to organize an arrangement without adding a corresponding concept to the memory.
 _Avoid_: Memory state, memory category

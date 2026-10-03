@@ -1,0 +1,123 @@
+/*
+ * Memory book: a hand-bound journal. The pinned card becomes the paper label on its walnut cover,
+ * the cover swings open on the spine, and the memory is read across two pages.
+ * Timings mirror OPEN_MS / CLOSE_MS / TURN_MS in memory-book.tsx.
+ */
+.book-stage {
+  --leather: #35231a; --leather-hi: #5a402f; --brass: #d9b47d; --paper: #fbf6ea; --ink: #2b241c;
+  position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; padding: 2vh 2vw 9vh;
+  background:
+    radial-gradient(ellipse 62% 56% at 50% 44%, rgba(255, 204, 138, .28), transparent 72%),
+    rgba(20, 14, 9, .82);
+  backdrop-filter: blur(9px) saturate(.7);
+  animation: book-stage-in .5s ease both;
+}
+.book-stage.is-closing { animation: book-stage-out .5s ease .4s both; }
+@keyframes book-stage-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes book-stage-out { from { opacity: 1; } to { opacity: 0; } }
+
+.book-dust { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.book-dust i { position: absolute; width: 3px; height: 3px; border-radius: 50%; background: rgba(255, 232, 186, .85); box-shadow: 0 0 9px 2px rgba(255, 220, 150, .6); opacity: 0; animation: book-dust 15s ease-in-out infinite; }
+@keyframes book-dust { 0% { opacity: 0; transform: translate3d(0, 24px, 0); } 25%, 70% { opacity: .8; } 100% { opacity: 0; transform: translate3d(36px, -110px, 0); } }
+
+.book-frame { --book-w: min(1120px, 94vw); --book-h: min(700px, calc(100vh - 150px)); position: relative; width: var(--book-w); height: max(420px, var(--book-h)); perspective: 2600px; }
+.book-frame::after { content: ""; position: absolute; left: 6%; right: 6%; bottom: -22px; height: 44px; background: radial-gradient(ellipse at center, rgba(0, 0, 0, .6), transparent 70%); filter: blur(12px); pointer-events: none; }
+.book-fly, .book { position: absolute; inset: 0; transform-style: preserve-3d; }
+
+/* Open: lift off the card (FLIP from --fly-*), then slide to centre while the cover swings open. */
+.book-animated .book-fly { animation: book-fly .64s cubic-bezier(.2, .9, .25, 1) both; }
+.book-animated .book { animation: book-slide .86s cubic-bezier(.5, 0, .2, 1) .48s both; }
+.book-animated .book-leaf { animation: leaf-swing .92s cubic-bezier(.45, .05, .25, 1) .48s both; }
+.book-animated .book-leaf .book-face { animation: leaf-shade .92s ease-in-out .48s both; }
+@keyframes book-fly { from { transform: translate3d(var(--fly-x, 0px), var(--fly-y, 40px), 0) scale(var(--fly-s, .9)) rotate(-2deg); } to { transform: none; } }
+@keyframes book-slide { from { transform: translateX(-25%); } to { transform: none; } }
+@keyframes leaf-swing { from { transform: rotateY(0deg); } to { transform: rotateY(-180deg); } }
+@keyframes leaf-shade { 0%, 100% { filter: brightness(1); } 45% { filter: brightness(.72); } }
+
+/* Close: the cover shuts, then the book settles back onto its card. */
+.book-animated.is-closing .book { animation: book-slide .6s cubic-bezier(.5, 0, .2, 1) reverse both; }
+.book-animated.is-closing .book-leaf { animation: leaf-swing .6s cubic-bezier(.45, .05, .25, 1) reverse both; }
+.book-animated.is-closing .book-leaf .book-face { animation: leaf-shade .6s ease-in-out reverse both; }
+.book-animated.is-closing .book-fly { animation: book-land .48s cubic-bezier(.5, 0, .8, .4) .42s both; }
+@keyframes book-land { from { transform: none; opacity: 1; } to { transform: translate3d(var(--fly-x, 0px), var(--fly-y, 40px), 0) scale(var(--fly-s, .9)) rotate(-2deg); opacity: 0; } }
+
+.book-leaf { position: absolute; left: 50%; top: 0; width: 50%; height: 100%; transform-origin: left center; transform-style: preserve-3d; transform: rotateY(-180deg); }
+.book-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.book-board-left { transform: rotateY(180deg); }
+
+/* Boards and cover share the walnut leather. */
+.book-cover, .book-board {
+  background:
+    radial-gradient(120% 90% at 18% 8%, rgba(255, 255, 255, .09), transparent 55%),
+    repeating-linear-gradient(45deg, rgba(255, 255, 255, .028) 0 2px, transparent 2px 5px),
+    linear-gradient(135deg, var(--leather-hi), var(--leather) 60%, #24160f);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07);
+}
+.book-board { padding: 12px; }
+.book-board-right { position: absolute; left: 50%; top: 0; width: 50%; height: 100%; padding-left: 0; border-radius: 0 14px 14px 0; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07), 0 30px 70px rgba(0, 0, 0, .55); }
+.book-board-left { padding-right: 0; border-radius: 14px 0 0 14px; }
+
+.book-cover { display: grid; place-items: center; border-radius: 4px 14px 14px 4px; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .07), 0 30px 70px rgba(0, 0, 0, .55); }
+.book-cover::before { content: ""; position: absolute; inset: 20px 20px 20px 36px; border: 1.5px dashed rgba(217, 180, 125, .7); border-radius: 6px; pointer-events: none; }
+.book-cover::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 22px; background: linear-gradient(90deg, rgba(0, 0, 0, .45), rgba(0, 0, 0, .1) 60%, transparent); border-radius: 4px 0 0 4px; pointer-events: none; }
+.book-label { position: relative; width: 64%; padding: 34px 22px 26px; transform: rotate(-1.4deg); border-radius: 2px; box-shadow: 0 14px 30px rgba(0, 0, 0, .5), 0 2px 0 rgba(255, 255, 255, .5) inset; color: #303129; text-align: left; }
+.book-label-pin { position: absolute; top: 10px; left: 50%; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; box-shadow: 3px 7px 10px rgba(0, 0, 0, .55), inset 1px 2px 3px rgba(255, 255, 255, .6); }
+.book-label-kind { display: block; margin-bottom: 10px; font-family: var(--font-space-mono), ui-monospace, monospace; font-size: 10px; font-weight: 700; letter-spacing: .18em; text-transform: uppercase; color: #5c554a; }
+.book-label-title { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; font-family: var(--font-newsreader), Georgia, serif; font-size: clamp(1.4rem, 2.4vw, 2rem); font-style: italic; line-height: 1.12; overflow-wrap: anywhere; }
+
+/* Pages */
+.book-page { position: relative; height: 100%; background-color: var(--paper); color: var(--ink); }
+.book-page-right {
+  border-radius: 0 6px 6px 0;
+  background-image: linear-gradient(to right, rgba(70, 45, 20, .26), rgba(70, 45, 20, .07) 4%, transparent 12%), linear-gradient(to bottom, rgba(255, 255, 255, .5), transparent 30%);
+  box-shadow: 2px 1px 0 #efe5cf, 4px 2px 0 #e1d4b6, 6px 3px 0 #efe5cf;
+}
+.book-page-left {
+  border-radius: 6px 0 0 6px;
+  background-image: linear-gradient(to left, rgba(70, 45, 20, .26), rgba(70, 45, 20, .07) 4%, transparent 12%), linear-gradient(to bottom, rgba(255, 255, 255, .5), transparent 30%);
+  box-shadow: -2px 1px 0 #efe5cf, -4px 2px 0 #e1d4b6, -6px 3px 0 #efe5cf;
+}
+.book-page-body { position: absolute; inset: 0; overflow-y: auto; animation: book-page-in .45s ease both; }
+.book-page-right .book-page-body { padding: 34px 40px 30px 52px; }
+.book-page-left .book-page-body { display: flex; flex-direction: column; overflow: hidden; padding: 34px 52px 30px 40px; }
+@keyframes book-page-in { from { opacity: 0; } to { opacity: 1; } }
+
+.book-ribbon { position: absolute; z-index: 2; top: -5px; right: 58px; width: 22px; height: 84px; background: linear-gradient(90deg, rgba(0, 0, 0, .18), transparent 40%, rgba(255, 255, 255, .18)), var(--category); clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 84%, 0 100%); pointer-events: none; }
+
+.memory-details-page { outline: none; }
+.book-reflection { margin-top: 4px; font-family: var(--font-newsreader), Georgia, serif; font-size: clamp(1.05rem, 1.35vw, 1.28rem); line-height: 1.78; color: var(--ink); }
+.book-reflection::first-letter { float: left; padding: .06em .12em 0 0; font-size: 3.7em; font-style: italic; line-height: .78; color: var(--category); }
+
+.book-left-content { display: flex; flex: 1; flex-direction: column; gap: 14px; min-height: 0; }
+.book-stamp { align-self: flex-start; padding: 4px 12px; transform: rotate(-3deg); border: 2px solid currentColor; border-radius: 4px; font-family: var(--font-space-mono), ui-monospace, monospace; font-size: 11px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; mix-blend-mode: multiply; opacity: .88; }
+.book-title { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; margin: 0; font-family: var(--font-newsreader), Georgia, serif; font-size: clamp(2rem, 3.4vw, 3.2rem); font-style: italic; font-weight: 500; line-height: 1.05; letter-spacing: -.01em; overflow-wrap: anywhere; color: var(--ink); }
+.book-date { margin: 0; font-family: var(--font-space-mono), ui-monospace, monospace; font-size: 11px; letter-spacing: .16em; text-transform: uppercase; color: #a49e92; }
+.book-photo { position: relative; display: flex; flex: 1; min-height: 0; margin: 10px 8px 0; padding: 10px 10px 34px; transform: rotate(-1.6deg); background: #fff; box-shadow: 0 10px 26px rgba(61, 43, 27, .28), 0 1px 3px rgba(61, 43, 27, .3); }
+.book-photo::before { content: ""; position: absolute; top: -12px; left: 50%; width: 96px; height: 26px; margin-left: -48px; transform: rotate(-3deg); background: color-mix(in srgb, var(--category) 45%, #fff 30%); opacity: .78; box-shadow: 0 1px 3px rgba(0, 0, 0, .2); }
+.book-photo > * { width: 100%; min-height: 0; }
+.book-photo-image { height: 100%; object-fit: cover; }
+.book-epigraph { margin: auto 0 0; padding-top: 12px; border-top: 1px solid rgba(48, 41, 29, .16); font-family: var(--font-newsreader), Georgia, serif; font-size: 1rem; font-style: italic; color: #7a7469; }
+.book-epigraph::before { content: "“"; } .book-epigraph::after { content: "”"; }
+
+/* Page turn: a sheet hinged on the spine sweeps across; the content swaps while it is edge-on. */
+.book-turn { position: absolute; left: 50%; top: 12px; bottom: 12px; width: calc(50% - 12px); pointer-events: none; transform-origin: left center; transform-style: preserve-3d; animation: turn-forward .82s cubic-bezier(.5, .05, .3, 1) both; }
+.book-turn.turn-back { animation-name: turn-back; }
+.book-turn-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 0 6px 6px 0; background: linear-gradient(to right, rgba(70, 45, 20, .2), transparent 14%), var(--paper); box-shadow: 0 0 22px rgba(0, 0, 0, .28); }
+.book-turn-back { transform: rotateY(180deg); border-radius: 6px 0 0 6px; background: linear-gradient(to left, rgba(70, 45, 20, .2), transparent 14%), var(--paper); }
+@keyframes turn-forward { from { transform: translateZ(1px) rotateY(0deg); filter: brightness(1); } 50% { filter: brightness(.82); } to { transform: translateZ(1px) rotateY(-180deg); filter: brightness(1); } }
+@keyframes turn-back { from { transform: translateZ(1px) rotateY(-180deg); filter: brightness(1); } 50% { filter: brightness(.82); } to { transform: translateZ(1px) rotateY(0deg); filter: brightness(1); } }
+
+.book-footer { position: absolute; top: calc(100% + 18px); left: 50%; display: flex; align-items: center; gap: 14px; padding: 6px 8px; transform: translateX(-50%); border: 1px solid rgba(217, 180, 125, .35); border-radius: 999px; background: rgba(36, 24, 16, .72); color: #e9dcc4; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; }
+.book-animated .book-footer { animation: book-page-in .5s ease 1.2s both; }
+.book-animated.is-closing .book-footer { animation: none; opacity: 0; }
+.book-footer button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 50%; background: rgba(217, 180, 125, .16); color: inherit; font-size: 20px; line-height: 1; transition: background .2s ease; }
+.book-footer button:hover:not(:disabled) { background: rgba(217, 180, 125, .36); }
+.book-footer button:disabled { opacity: .35; cursor: default; }
+.book-stage button:focus-visible, .book-stage a:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+
+/* Calm / reduced motion: the book is simply there, already open. */
+.book-still .book-leaf { transform: rotateY(-180deg); }
+@media (prefers-reduced-motion: reduce) {
+  .book-stage, .book-stage * { animation-duration: .01ms !important; animation-delay: 0s !important; }
+  .book-dust { display: none; }
+}
