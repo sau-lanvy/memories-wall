@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { memorySchema } from "@/domain/memory";
+import { memorySchema, wallPresentationSchema } from "@/domain/memory";
 import { InMemoryMemoryStore, MemoryPermissionError, MemoryRepository, MemoryValidationError, type MemoryImageStorage, type MemoryImageUrlSigner } from "@/server/memory-repository";
 
 const userA = "alice";
@@ -8,6 +8,17 @@ async function repository() { return new MemoryRepository(new InMemoryMemoryStor
 async function memory(repo: MemoryRepository, title = "A quiet morning") { return repo.createMemory({ title, reflection: "The light was soft and I noticed it.", category: "gratitude", visibility: "private", wallId: "personal" }, userA); }
 
 describe("MemoryRepository", () => {
+  it("normalizes decoration layers saved by the previous catalog", () => {
+    const presentation = wallPresentationSchema.parse({
+      wallId: "personal",
+      userId: userA,
+      revision: 1,
+      backgroundPreset: "linen",
+      decorationLayers: ["dust-motes", "falling-petals"],
+    });
+    expect(presentation.decorationLayers).toEqual(["photo-collage", "autumn"]);
+  });
+
   it("applies published templates deterministically and preserves size and image metadata", async () => {
     const repo = await repository(); const first = await memory(repo, "First"); const second = await memory(repo, "Second");
     await repo.updateCardPlacement({ memoryId: first.id, sizePreset: "large" }, userA);
@@ -58,6 +69,11 @@ describe("MemoryRepository", () => {
     await expect(repo.updateCardPlacement({ memoryId: item.id, coordinates: { x: 50, y: 50 } }, userB)).rejects.toBeInstanceOf(MemoryPermissionError);
     await expect(repo.deleteMemory(item.id, userB)).rejects.toBeInstanceOf(MemoryPermissionError);
     expect((await repo.getMemory(item.id, userA)).title).toBe("A quiet morning");
+  });
+
+  it("returns no reaction for a readable private memory", async () => {
+    const repo = await repository(); const item = await memory(repo);
+    await expect(repo.hasReaction(item.id, userA)).resolves.toBe(false);
   });
 
   it("keeps freeform and snapped placement histories independent across toggles", async () => {
@@ -152,7 +168,8 @@ describe("MemoryRepository", () => {
     await repo.createMemory({ title: "Private light", reflection: "Not for others", category: "growth", visibility: "private", wallId: "personal" }, userA);
 
     expect((await repo.searchMemoriesForUser("LIGHT", userB)).map((entry) => entry.id)).toEqual([shared.id]);
-    expect((await repo.searchMemoriesForUser("LIGHT", userA)).map((entry) => entry.id)).toEqual([shared.id]);
+    expect((await repo.searchMemoriesForUser("LIGHT", userA)).map((entry) => entry.id)).toEqual(expect.arrayContaining([shared.id]));
+    expect((await repo.searchMemoriesForUser("LIGHT", userA)).some((entry) => entry.title === "Private light")).toBe(true);
   });
 
   it("searches public discovery without exposing selected-community or private memories", async () => {
@@ -187,6 +204,20 @@ describe("MemoryRepository", () => {
     expect(result.images?.[0].url).toMatch(/^https:\/\/storage\.test\/memory\/alice\/.+\?sig=read$/);
     expect((await repo.getMemoryMediaGallery(item.id, userA))[0].url).toMatch(/^https:\/\/storage\.test\/memory\/alice\/.+\?sig=read$/);
     expect(result.images?.[0].thumbnailUrl).toBeUndefined();
+  });
+
+  it("does not persist decorated image URLs while applying a template", async () => {
+    const signer: MemoryImageUrlSigner = {
+      sign: async (storageKey) => `https://storage.test/${storageKey}?sig=read`,
+    };
+    const store = new InMemoryMemoryStore();
+    const repo = new MemoryRepository(store, signer);
+    const item = await memory(repo);
+    await repo.attachImage(item.id, { mediaType: "image/png", sizeBytes: 1024 }, userA);
+
+    const applied = await repo.applyWallTemplate({ templateId: "desk-grid" }, userA);
+    expect(applied.memories[0].images?.[0].url).toMatch(/^https:\/\/storage\.test\//);
+    expect((await store.get(item.id))?.images?.[0]).not.toHaveProperty("url");
   });
 
   it("uploads image bytes before persisting image metadata", async () => {
@@ -291,5 +322,24 @@ describe("MemoryRepository", () => {
     const result = await repo.applyWallTemplate({ templateId: "scattered-notes" }, userA);
     const presentation = await repo.getWallPresentation("personal", userA);
     expect(presentation.templateId).toBe("scattered-notes"); expect(presentation.backgroundPreset).toBe("sage-paper"); expect(result.memories).toEqual([]);
+  });
+
+  it("returns the template visual treatment with an application", async () => {
+    const repo = await repository();
+    const result = await repo.applyWallTemplate({ templateId: "scattered-notes" }, userA);
+    expect(result.template.visualTreatment).toEqual({
+      scene: "paper-drift",
+      motion: "drift",
+      intensity: 0.35,
+    });
+  });
+
+  it("does not resurrect a memory deleted after template application", async () => {
+    const repo = await repository();
+    const item = await memory(repo, "To let go");
+    const applied = await repo.applyWallTemplate({ templateId: "desk-grid" }, userA);
+    await repo.deleteMemory(item.id, userA);
+    await repo.undoTemplateApplication("personal", userA, applied.revision);
+    await expect(repo.getMemory(item.id, userA)).rejects.toThrow("not found");
   });
 });

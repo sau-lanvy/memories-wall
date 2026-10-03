@@ -98,20 +98,50 @@ export type PlacementMode = "freeform" | "snapped";
 
 export const templateSlotSchema = z.object({ x: z.number().finite().min(0).max(100), y: z.number().finite().min(0).max(100), rotation: z.number().finite().min(-8).max(8).optional(), lane: z.enum(["now", "next", "later"]) }).strict();
 export type TemplateSlot = z.infer<typeof templateSlotSchema>;
-export const wallTemplateSchema = z.object({ id: z.string().min(1), name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(500), previewAsset: z.string().min(1), version: z.number().int().positive(), published: z.literal(true), backgroundPreset: z.enum(["neutral-texture", "linen", "sage-paper", "clay-paper", "blueprint-paper"]).default("neutral-texture"), slots: z.array(templateSlotSchema).min(1) }).strict();
+export const templateVisualTreatmentSchema = z.object({
+  scene: z.enum(["paper-drift", "warm-cabinet", "soft-constellation", "botanical-light", "blueprint-glow"]),
+  motion: z.enum(["still", "breathe", "float", "drift", "constellation"]),
+  intensity: z.number().finite().min(0).max(1),
+}).strict();
+export type TemplateVisualTreatment = z.infer<typeof templateVisualTreatmentSchema>;
+export const wallTemplateSchema = z.object({ id: z.string().min(1), name: z.string().trim().min(1).max(120), description: z.string().trim().min(1).max(500), previewAsset: z.string().min(1), version: z.number().int().positive(), published: z.literal(true), backgroundPreset: z.enum(["neutral-texture", "linen", "sage-paper", "clay-paper", "blueprint-paper"]).default("neutral-texture"), visualTreatment: templateVisualTreatmentSchema, slots: z.array(templateSlotSchema).min(1) }).strict();
 export type WallTemplate = z.infer<typeof wallTemplateSchema>;
 
 export const WALL_BACKGROUND_PRESETS = ["neutral-texture", "linen", "sage-paper", "clay-paper", "blueprint-paper"] as const;
 export const wallBackgroundPresetSchema = z.enum(WALL_BACKGROUND_PRESETS);
 export type WallBackgroundPreset = z.infer<typeof wallBackgroundPresetSchema>;
+
+/** Fixed, published catalog of Decoration Layers. Each is purely additive and never alters a template's scene/motion. */
+export const DECORATION_LAYER_CATALOG = [
+  { id: "photo-collage", name: "Photo Collage", description: "Paper, pins, tape, and layered memory images.", animated: false },
+  { id: "lights", name: "Lights", description: "Small warm lights that glow softly.", animated: true },
+  { id: "snow", name: "Snow", description: "Quiet snow falling across the wall.", animated: true },
+  { id: "autumn", name: "Autumn", description: "Warm leaves drifting through the wall.", animated: true },
+  { id: "warm-glow", name: "Warm Glow", description: "A quiet, static warmth around the edges.", animated: false },
+] as const;
+export const DECORATION_LAYERS = DECORATION_LAYER_CATALOG.map((layer) => layer.id);
+export const MAX_ACTIVE_DECORATION_LAYERS = 3;
+export const decorationLayerSchema = z.enum(DECORATION_LAYERS as [string, ...string[]]);
+export type DecorationLayer = z.infer<typeof decorationLayerSchema>;
+const legacyDecorationLayerIds: Record<string, DecorationLayer> = {
+  "dust-motes": "photo-collage",
+  "falling-petals": "autumn",
+  "string-lights": "lights",
+};
+export const decorationLayersSchema = z.preprocess(
+  (value) => Array.isArray(value) ? value.map((layer) => typeof layer === "string" ? legacyDecorationLayerIds[layer] ?? layer : layer) : value,
+  z.array(decorationLayerSchema).max(MAX_ACTIVE_DECORATION_LAYERS).transform((layers) => [...new Set(layers)]),
+);
+
 export const wallPresentationSchema = z.object({
   wallId: z.string().min(1), userId: z.string().min(1), revision: z.number().int().nonnegative(),
   backgroundPreset: wallBackgroundPresetSchema, templateId: z.string().min(1).optional(), templateVersion: z.number().int().positive().optional(),
+  decorationLayers: decorationLayersSchema.default([]),
   undo: z.object({ memories: z.array(memorySchema).transform((value) => value as Memory[]), backgroundPreset: wallBackgroundPresetSchema, templateId: z.string().min(1).optional(), templateVersion: z.number().int().positive().optional() }).optional(),
 }).strict();
 export type WallPresentation = z.infer<typeof wallPresentationSchema>;
 
-export const wallDataSchema = z.object({ memories: z.array(memorySchema), snapToGrid: z.boolean(), backgroundPreset: wallBackgroundPresetSchema.default("neutral-texture"), templateId: z.string().min(1).optional(), templateVersion: z.number().int().positive().optional(), templateRevision: z.number().int().nonnegative().default(0), canUndoTemplate: z.boolean().default(false) }).strict();
+export const wallDataSchema = z.object({ memories: z.array(memorySchema), snapToGrid: z.boolean(), backgroundPreset: wallBackgroundPresetSchema.default("neutral-texture"), templateId: z.string().min(1).optional(), templateVersion: z.number().int().positive().optional(), templateRevision: z.number().int().nonnegative().default(0), canUndoTemplate: z.boolean().default(false), decorationLayers: decorationLayersSchema.default([]) }).strict();
 
 export const commentSchema = z.object({
   id: z.string().min(1),
