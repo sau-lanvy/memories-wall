@@ -6,6 +6,18 @@ import { useFrame } from "@react-three/fiber";
 import type { DecorationLayer, Memory, TemplateVisualTreatment, WallTemplate } from "@/domain/memory";
 import type { Group, Mesh } from "three";
 
+type Scene = TemplateVisualTreatment["scene"];
+const SCENE_FIELD: Record<Scene, { count: number; color: string; size: number; opacity: number }> = {
+  "paper-drift": { count: 38, color: "#b49a78", size: 0.045, opacity: 0.5 },
+  "warm-cabinet": { count: 30, color: "#ffb45e", size: 0.055, opacity: 0.75 },
+  "soft-constellation": { count: 54, color: "#ffffff", size: 0.04, opacity: 0.85 },
+  "botanical-light": { count: 30, color: "#f3e58a", size: 0.06, opacity: 0.65 },
+  "blueprint-glow": { count: 77, color: "#e6f6ff", size: 0.05, opacity: 0.7 },
+};
+const FIELD_W = 20;
+const FIELD_H = 14;
+const unit = (index: number, salt: number) => { const value = Math.sin(index * 127.1 + salt * 311.7) * 43758.5453; return value - Math.floor(value); };
+
 const DEFAULT_TREATMENT: TemplateVisualTreatment = { scene: "paper-drift", motion: "still", intensity: 0 };
 const sceneColors: Record<TemplateVisualTreatment["scene"], string> = {
   "paper-drift": "#eadfce",
@@ -14,6 +26,46 @@ const sceneColors: Record<TemplateVisualTreatment["scene"], string> = {
   "botanical-light": "#b9cbb1",
   "blueprint-glow": "#9fb8c8",
 };
+
+/** One ambient particle field per template scene, with a gentle pointer parallax. */
+function SceneField({ scene, intensity, animate }: { scene: Scene; intensity: number; animate: boolean }) {
+  const config = SCENE_FIELD[scene];
+  const group = useRef<Group>(null);
+  const pointer = useRef({ x: 0, y: 0 });
+  const motes = useMemo(() => Array.from({ length: config.count }, (_, index) => scene === "blueprint-glow"
+    ? { x: (index % 11) * 1.8 - 9, y: Math.floor(index / 11) * 1.8 - 5.4, seed: index, depth: 0 }
+    : { x: unit(index, 1) * FIELD_W - FIELD_W / 2, y: unit(index, 2) * FIELD_H - FIELD_H / 2, seed: unit(index, 3) * 6.28, depth: unit(index, 4) }), [config.count, scene]);
+  useEffect(() => {
+    if (!animate) return;
+    const move = (event: PointerEvent) => { pointer.current = { x: event.clientX / window.innerWidth - 0.5, y: event.clientY / window.innerHeight - 0.5 }; };
+    window.addEventListener("pointermove", move, { passive: true });
+    return () => window.removeEventListener("pointermove", move);
+  }, [animate]);
+  useFrame(({ clock }) => {
+    const root = group.current;
+    if (!root || !animate) return;
+    const time = clock.getElapsedTime();
+    const boost = 0.6 + intensity * 2;
+    root.position.x += (-pointer.current.x * 0.8 - root.position.x) * 0.04;
+    root.position.y += (pointer.current.y * 0.6 - root.position.y) * 0.04;
+    root.children.forEach((child, index) => {
+      const mote = motes[index];
+      if (!mote) return;
+      const mesh = child as Mesh;
+      const wrap = (value: number, size: number) => ((value + size / 2) % size + size) % size - size / 2;
+      if (scene === "paper-drift") { mesh.position.set(wrap(mote.x + time * 0.12 * boost, FIELD_W), wrap(mote.y - time * 0.2 * boost, FIELD_H), 0); mesh.rotation.z = time * 0.4 + mote.seed; }
+      else if (scene === "warm-cabinet") { mesh.position.set(mote.x + Math.sin(time * 0.6 + mote.seed) * 0.25, wrap(mote.y + time * (0.25 + mote.depth * 0.3) * boost, FIELD_H), 0); mesh.scale.setScalar(0.6 + Math.abs(Math.sin(time * 1.4 + mote.seed)) * 0.9); }
+      else if (scene === "soft-constellation") mesh.scale.setScalar(0.5 + Math.abs(Math.sin(time * (0.5 + mote.depth) + mote.seed)) * 1.6);
+      else if (scene === "botanical-light") mesh.position.set(mote.x + Math.sin(time * 0.35 + mote.seed) * 0.8, wrap(mote.y + time * 0.08 * boost, FIELD_H) + Math.cos(time * 0.5 + mote.seed) * 0.3, 0);
+      else mesh.scale.setScalar(0.7 + (Math.sin(time * 1.2 - Math.hypot(mote.x, mote.y) * 0.7) + 1) * 0.7);
+    });
+  });
+  return <group ref={group}>
+    {motes.map((mote, index) => <mesh key={index} position={[mote.x, mote.y, -0.1]}>
+      <circleGeometry args={[config.size * (1 + mote.depth), 8]} /><meshBasicMaterial color={config.color} transparent opacity={config.opacity} />
+    </mesh>)}
+  </group>;
+}
 
 function CardMesh({ memory, index, treatment, reducedMotion }: { memory: Memory; index: number; treatment: TemplateVisualTreatment; reducedMotion: boolean }) {
   const group = useRef<Group>(null);
@@ -92,7 +144,7 @@ function DomDecorationLayers({ layers, reducedMotion }: { layers: DecorationLaye
 }
 
 /** Renders the selected template's decorative scene without owning wall interaction. */
-export function ThreeWall({ memories, template, decorationLayers = [] }: { memories: Memory[]; template?: WallTemplate; decorationLayers?: DecorationLayer[] }) {
+export function ThreeWall({ memories, template, decorationLayers = [], lively = true }: { memories: Memory[]; template?: WallTemplate; decorationLayers?: DecorationLayer[]; lively?: boolean }) {
   const cards = useMemo(() => memories, [memories]);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [canRender, setCanRender] = useState(false);
@@ -108,10 +160,11 @@ export function ThreeWall({ memories, template, decorationLayers = [] }: { memor
     return () => { if (typeof query.removeEventListener === "function") query.removeEventListener("change", update); };
   }, []);
   const treatment = template?.visualTreatment ?? DEFAULT_TREATMENT;
-  return <div ref={setEventSource} aria-hidden="true" className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-lg opacity-70 md:block">
+  return <div ref={setEventSource} aria-hidden="true" className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-lg opacity-90 md:block">
     <DomDecorationLayers layers={decorationLayers} reducedMotion={reducedMotion} />
     {canRender && eventSource && <Canvas eventSource={eventSource} orthographic camera={{ position: [0, 0, 8], zoom: 55 }} fallback={null} dpr={[1, 1.5]}>
-      <mesh position={[0, 0, -0.2]}><planeGeometry args={[20, 14]} /><meshBasicMaterial color={sceneColors[treatment.scene]} transparent opacity={0.16} /></mesh>
+      <mesh position={[0, 0, -0.2]}><planeGeometry args={[20, 14]} /><meshBasicMaterial color={sceneColors[treatment.scene]} transparent opacity={0.22} /></mesh>
+      <SceneField key={treatment.scene} scene={treatment.scene} intensity={treatment.intensity} animate={lively && !reducedMotion} />
       <ambientLight intensity={1.4} /><directionalLight position={[2, 3, 5]} intensity={1.2} />
       {cards.map((memory, index) => <CardMesh key={memory.id} memory={memory} index={index} treatment={treatment} reducedMotion={reducedMotion} />)}
       {decorationLayers.map((layer, index) => <DecorationLayerMesh key={layer} layer={layer} index={index} reducedMotion={reducedMotion} />)}

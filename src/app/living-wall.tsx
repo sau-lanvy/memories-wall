@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { categoryMeta, type Memory } from "@/domain/memory";
-import { breeze, MOTION_STORAGE_KEY, parseMotionMode, repelOffset, sparklePin, threadPaths, tiltFromPointer, timeOfDayTint, type MotionMode } from "@/app/wall-motion";
+import { breeze, MOTION_STORAGE_KEY, memoryOfTheDay, nextSpotlightId, parseMotionMode, prefersReducedMotion, repelOffset, sparklePin, threadPaths, tiltFromPointer, timeOfDayTint, type MotionMode } from "@/app/wall-motion";
 
 /** Persisted Calm / Lively preference, layered on top of the OS reduced-motion setting. */
 export function useMotionMode() {
@@ -126,4 +126,69 @@ export function CardThreads({ memories, layoutKey, rootRef }: { memories: Memory
   return <svg aria-hidden="true" className="card-threads pointer-events-none absolute inset-0 z-[5] h-full w-full overflow-visible">
     {threads.map((thread) => <path key={thread.key} d={thread.d} fill="none" stroke={colors[thread.category] ?? "#7a7469"} strokeWidth="1.5" strokeLinecap="round" strokeDasharray="1 5" className="card-thread" />)}
   </svg>;
+}
+
+const SCENE_CHANGE_MS = 1700;
+const SCENE_SWAP_MS = 320;
+
+/**
+ * Choreographs a template switch: `changing` is true in the same render that the arrangement moves, so cards
+ * glide to their new places; the background preset swaps late, while a wash of light covers the change.
+ */
+export function useSceneChange(revision: number, preset: string, lively: boolean) {
+  const [settledRevision, setSettledRevision] = useState(revision);
+  const [shownPreset, setShownPreset] = useState(preset);
+  useEffect(() => {
+    if (settledRevision === revision) return;
+    const timer = window.setTimeout(() => setSettledRevision(revision), SCENE_CHANGE_MS);
+    return () => window.clearTimeout(timer);
+  }, [revision, settledRevision]);
+  useEffect(() => {
+    if (preset === shownPreset) return;
+    const timer = window.setTimeout(() => setShownPreset(preset), lively && !prefersReducedMotion() ? SCENE_SWAP_MS : 0);
+    return () => window.clearTimeout(timer);
+  }, [preset, shownPreset, lively]);
+  const animated = lively && !prefersReducedMotion();
+  return { changing: animated && settledRevision !== revision, preset: animated ? shownPreset : preset };
+}
+
+/** After a quiet spell the wall lifts one memory at a time into the light; any input puts everything back. */
+export function useIdleSpotlight(ids: string[], enabled: boolean, idleMs = 25_000, stepMs = 4_500) {
+  const [spotlightId, setSpotlightId] = useState<string | null>(null);
+  const idsRef = useRef(ids);
+  idsRef.current = ids;
+  useEffect(() => {
+    if (!enabled || prefersReducedMotion()) { setSpotlightId(null); return; }
+    let idleTimer = 0;
+    let stepTimer = 0;
+    const arm = () => {
+      window.clearTimeout(idleTimer);
+      window.clearInterval(stepTimer);
+      setSpotlightId((current) => (current ? null : current));
+      idleTimer = window.setTimeout(() => {
+        setSpotlightId(nextSpotlightId(idsRef.current, null));
+        stepTimer = window.setInterval(() => setSpotlightId((current) => nextSpotlightId(idsRef.current, current)), stepMs);
+      }, idleMs);
+    };
+    const events = ["pointermove", "pointerdown", "keydown", "wheel", "touchstart"] as const;
+    events.forEach((name) => window.addEventListener(name, arm, { passive: true }));
+    arm();
+    return () => {
+      window.clearTimeout(idleTimer);
+      window.clearInterval(stepTimer);
+      events.forEach((name) => window.removeEventListener(name, arm));
+      setSpotlightId(null);
+    };
+  }, [enabled, idleMs, stepMs]);
+  return spotlightId;
+}
+
+/** The memory worth revisiting today. Picked after mount so server and client markup agree. */
+export function useMemoryOfTheDay(memories: { id: string; createdAt: string }[]) {
+  const [pick, setPick] = useState<ReturnType<typeof memoryOfTheDay>>(null);
+  const memoriesRef = useRef(memories);
+  memoriesRef.current = memories;
+  const key = memories.map((memory) => `${memory.id}@${memory.createdAt}`).join("|");
+  useEffect(() => { setPick(memoryOfTheDay(memoriesRef.current, new Date())); }, [key]);
+  return pick;
 }
