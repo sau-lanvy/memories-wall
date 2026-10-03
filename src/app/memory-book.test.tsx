@@ -104,7 +104,29 @@ describe("memory book", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
-  it("does not swap the memory when closed in the middle of a page turn", async () => {
+  it("turns a leaf that carries inert copies of the real pages, then removes it", async () => {
+    window.localStorage.setItem("memories-wall:motion", "lively");
+    stubViewport({ desktop: true });
+    render(<WallApp initialData={data} />);
+    openCard("A good beginning");
+    const book = await screen.findByRole("dialog");
+    await waitFor(() => expect(book).toHaveAttribute("data-animate", "true"));
+    vi.useFakeTimers();
+    fireEvent.keyDown(book, { key: "ArrowRight" });
+    const rig = book.querySelector(".book-turn-rig") as HTMLElement;
+    expect(rig).toHaveClass("turn-forward");
+    expect(rig).toHaveAttribute("aria-hidden", "true");
+    expect(rig.querySelector(".turn-seg-front")).toHaveTextContent("A good beginning, remembered.");
+    expect(rig.querySelector(".turn-seg-back")).toHaveTextContent("A finished chapter");
+    expect(rig.querySelector(".book-turn-ghost")).toHaveTextContent("A good beginning");
+    expect(rig.querySelectorAll("[id]")).toHaveLength(0);
+    expect(rig.querySelectorAll("[inert]").length).toBeGreaterThan(0);
+    act(() => { vi.advanceTimersByTime(1200); });
+    vi.useRealTimers();
+    expect(book.querySelector(".book-turn-rig")).toBeNull();
+  });
+
+  it("closes cleanly when dismissed in the middle of a page turn", async () => {
     window.localStorage.setItem("memories-wall:motion", "lively");
     stubViewport({ desktop: true });
     render(<WallApp initialData={data} />);
