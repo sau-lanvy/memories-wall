@@ -27,7 +27,22 @@ describe("wall public behavior", () => { beforeEach(() => window.localStorage.cl
     await user.click(effect);
     expect(effect).toBeChecked();
   });
-  it("renders category meaning as accessible text, not color alone", () => { render(<WallApp initialData={base} />); expect(screen.getAllByText("Gratitude").length).toBeGreaterThan(0); expect(screen.getByRole("button", { name: "A good beginning, Gratitude memory" })).toBeInTheDocument(); expect(screen.queryByText("My archive")).not.toBeInTheDocument(); expect(screen.queryByText("Everything you have kept")).not.toBeInTheDocument(); });
+  it("lets the user switch the wall between Lively and Calm motion and remembers it", async () => {
+    const user = (await import("@testing-library/user-event")).default.setup();
+    render(<WallApp initialData={{ ...base, userId: "demo-user" }} />);
+    const wall = screen.getByRole("region", { name: "Memory wall" });
+    expect(wall).toHaveClass("motion-lively");
+    await user.click(screen.getByRole("button", { name: "Motion: Lively" }));
+    expect(screen.getByRole("region", { name: "Memory wall" })).toHaveClass("motion-calm");
+    expect(window.localStorage.getItem("memories-wall:motion")).toBe("calm");
+  });
+  it("renders the wall atmosphere and card tilt markers without altering card semantics", () => {
+    const { container } = render(<WallApp initialData={base} />);
+    expect(container.querySelector(".wall-atmosphere")).not.toBeNull();
+    expect(container.querySelector(".note-card[data-id='one']")).not.toBeNull();
+  });
+  it("renders category meaning as accessible text, not color alone", () => {
+ render(<WallApp initialData={base} />); expect(screen.getAllByText("Gratitude").length).toBeGreaterThan(0); expect(screen.getByRole("button", { name: "A good beginning, Gratitude memory" })).toBeInTheDocument(); expect(screen.queryByText("My archive")).not.toBeInTheDocument(); expect(screen.queryByText("Everything you have kept")).not.toBeInTheDocument(); });
   it("recognizes memories owned by the authenticated user", async () => {
     const authenticatedMemory = { ...base.memories[0], authorId: "authenticated-user" };
     render(<WallApp initialData={{ ...base, userId: "authenticated-user", memories: [authenticatedMemory] }} />);
