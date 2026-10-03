@@ -121,7 +121,7 @@ export function WallApp({ initialData }: { initialData: import("@/server/actions
           <WallAtmosphere preset={scene.preset} />
           {scene.changing && <i aria-hidden="true" className="scene-wash" />}
           <CardThreads memories={visibleMemories} layoutKey={layoutKey} rootRef={canvasRef} />
-          <ThreeWall memories={visibleMemories} template={activeTemplate} decorationLayers={decorationLayers} lively={lively} />
+          <ThreeWall memories={visibleMemories} template={activeTemplate} decorationLayers={decorationLayers} lively={lively} paused={Boolean(selected) && bookMode && bookOpen && !positionMode} />
           <div aria-hidden="true" className="pointer-events-none absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 199px, #000 199px, #000 200px), repeating-linear-gradient(90deg, transparent, transparent 399px, #000 399px, #000 400px)" }} />
           <div className="pointer-events-none absolute left-2 top-2 text-[9px] font-bold uppercase tracking-[.18em] text-[#a49e92]">{data.snapToGrid ? "Aligned desk · snapped positions" : "Open desk · drag to arrange"}</div>
           <div className="pointer-events-none relative z-10 mx-5 mt-5 max-w-sm rounded-2xl border border-white/70 bg-[#fdfcfa]/85 px-5 py-4 shadow-sm backdrop-blur-sm"><p className="font-archive text-[10px] font-bold uppercase tracking-[.18em] text-[#a49e92]">{category === "all" ? "The whole archive" : categoryMeta[category].label}</p><p className="font-serif-custom mt-1 text-xl italic leading-tight text-[#3a352d]">{category === "all" ? "A collection of moments, kept close." : categoryMeta[category].description}</p></div>

@@ -1,15 +1,14 @@
 /*
  * Memory book: a hand-bound journal. The pinned card becomes the paper label on its walnut cover,
  * the cover swings open on the spine, and the memory is read across two pages.
- * Timings mirror OPEN_MS / CLOSE_MS / TURN_MS in memory-book.tsx.
+ * Timings mirror OPEN_MS / CLOSE_MS in memory-book.tsx; page turns are animated from script (see page-turn.ts).
  */
 .book-stage {
   --leather: #35231a; --leather-hi: #5a402f; --brass: #d9b47d; --paper: #fbf6ea; --ink: #2b241c;
   position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; padding: 2vh 2vw 9vh;
   background:
     radial-gradient(ellipse 62% 56% at 50% 44%, rgba(255, 204, 138, .28), transparent 72%),
-    rgba(20, 14, 9, .82);
-  backdrop-filter: blur(9px) saturate(.7);
+    rgba(18, 12, 8, .9);
   animation: book-stage-in .5s ease both;
 }
 .book-stage.is-closing { animation: book-stage-out .5s ease .4s both; }
@@ -24,20 +23,34 @@
 .book-frame::after { content: ""; position: absolute; left: 6%; right: 6%; bottom: -22px; height: 44px; background: radial-gradient(ellipse at center, rgba(0, 0, 0, .6), transparent 70%); filter: blur(12px); pointer-events: none; }
 .book-fly, .book { position: absolute; inset: 0; transform-style: preserve-3d; }
 
-/* Open: lift off the card (FLIP from --fly-*), then slide to centre while the cover swings open. */
+/* Open: lift off the card (FLIP from --fly-*), then slide to centre while the cover peels up, swings, and settles. */
 .book-animated .book-fly { animation: book-fly .64s cubic-bezier(.2, .9, .25, 1) both; }
-.book-animated .book { animation: book-slide .86s cubic-bezier(.5, 0, .2, 1) .48s both; }
-.book-animated .book-leaf { animation: leaf-swing .92s cubic-bezier(.45, .05, .25, 1) .48s both; }
-.book-animated .book-leaf .book-face { animation: leaf-shade .92s ease-in-out .48s both; }
+.book-animated .book { animation: book-slide .9s cubic-bezier(.45, 0, .2, 1) .42s both; }
+.book-animated .book-leaf { animation: leaf-swing 1.08s linear .42s both, leaf-bow 1.08s ease-in-out .42s both; }
+.book-animated .book-open-cast { animation-duration: 1.08s; animation-delay: .42s; animation-timing-function: linear; animation-fill-mode: both; }
+.book-animated .book-open-cast.turn-cast-right { animation-name: cast-leave; }
+.book-animated .book-open-cast.turn-cast-left { animation-name: cast-land; }
+.book-face-shade { position: absolute; inset: 0; z-index: 6; border-radius: inherit; background: #140b05; opacity: 0; pointer-events: none; }
+.book-animated .book-cover .book-face-shade { animation: leaf-shade-front 1.08s linear .42s both; }
+.book-animated .book-board-left .book-face-shade { animation: leaf-shade-back 1.08s linear .42s both; }
 @keyframes book-fly { from { transform: translate3d(var(--fly-x, 0px), var(--fly-y, 40px), 0) scale(var(--fly-s, .9)) rotate(-2deg); } to { transform: none; } }
 @keyframes book-slide { from { transform: translateX(-25%); } to { transform: none; } }
-@keyframes leaf-swing { from { transform: rotateY(0deg); } to { transform: rotateY(-180deg); } }
-@keyframes leaf-shade { 0%, 100% { filter: brightness(1); } 45% { filter: brightness(.72); } }
+/* Peel slowly, sweep through, then overshoot a touch and settle flat on the table. */
+@keyframes leaf-swing {
+  0% { transform: rotateY(0deg); animation-timing-function: cubic-bezier(.5, 0, .35, 1); }
+  84% { transform: rotateY(-183deg); animation-timing-function: cubic-bezier(.4, 0, .5, 1); }
+  100% { transform: rotateY(-180deg); }
+}
+@keyframes leaf-shut { from { transform: rotateY(-180deg); } to { transform: rotateY(0deg); } }
+@keyframes leaf-bow { 0%, 100% { rotate: 1 0 0 0deg; } 40% { rotate: 1 0 0 1.8deg; } }
+@keyframes leaf-shade-front { 0% { opacity: 0; } 50%, 100% { opacity: .5; } }
+@keyframes leaf-shade-back { 0%, 50% { opacity: .5; } 100% { opacity: 0; } }
 
-/* Close: the cover shuts, then the book settles back onto its card. */
+/* Close: the cover swings shut and lands with a quick settle, then the book returns to its card. */
 .book-animated.is-closing .book { animation: book-slide .6s cubic-bezier(.5, 0, .2, 1) reverse both; }
-.book-animated.is-closing .book-leaf { animation: leaf-swing .6s cubic-bezier(.45, .05, .25, 1) reverse both; }
-.book-animated.is-closing .book-leaf .book-face { animation: leaf-shade .6s ease-in-out reverse both; }
+.book-animated.is-closing .book-leaf { animation: leaf-shut .6s cubic-bezier(.5, 0, .7, .6) both; }
+.book-animated.is-closing .book-cover .book-face-shade { animation: leaf-shade-front .6s linear reverse both; }
+.book-animated.is-closing .book-board-left .book-face-shade { animation: leaf-shade-back .6s linear reverse both; }
 .book-animated.is-closing .book-fly { animation: book-land .48s cubic-bezier(.5, 0, .8, .4) .42s both; }
 @keyframes book-land { from { transform: none; opacity: 1; } to { transform: translate3d(var(--fly-x, 0px), var(--fly-y, 40px), 0) scale(var(--fly-s, .9)) rotate(-2deg); opacity: 0; } }
 
@@ -77,7 +90,9 @@
   background-image: linear-gradient(to left, rgba(70, 45, 20, .26), rgba(70, 45, 20, .07) 4%, transparent 12%), linear-gradient(to bottom, rgba(255, 255, 255, .5), transparent 30%);
   box-shadow: -2px 1px 0 #efe5cf, -4px 2px 0 #e1d4b6, -6px 3px 0 #efe5cf;
 }
-.book-page-body { position: absolute; inset: 0; overflow-y: auto; animation: book-page-in .45s ease both; }
+/* In Lively mode a turned-to page is already lying underneath the leaf, as in a real book; only Calm mode fades it in. */
+.book-page-body { position: absolute; inset: 0; overflow-y: auto; }
+.book-still .book-page-body { animation: book-page-in .45s ease both; }
 .book-page-right .book-page-body { padding: 34px 40px 30px 52px; }
 .book-page-left .book-page-body { display: flex; flex-direction: column; overflow: hidden; padding: 34px 52px 30px 40px; }
 @keyframes book-page-in { from { opacity: 0; } to { opacity: 1; } }
@@ -99,16 +114,49 @@
 .book-epigraph { margin: auto 0 0; padding-top: 12px; border-top: 1px solid rgba(48, 41, 29, .16); font-family: var(--font-newsreader), Georgia, serif; font-size: 1rem; font-style: italic; color: #7a7469; }
 .book-epigraph::before { content: "“"; } .book-epigraph::after { content: "”"; }
 
-/* Page turn: a sheet hinged on the spine sweeps across; the content swaps while it is edge-on. */
-.book-turn { position: absolute; left: 50%; top: 12px; bottom: 12px; width: calc(50% - 12px); pointer-events: none; transform-origin: left center; transform-style: preserve-3d; animation: turn-forward .82s cubic-bezier(.5, .05, .3, 1) both; }
-.book-turn.turn-back { animation-name: turn-back; }
-.book-turn-face { position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden; border-radius: 0 6px 6px 0; background: linear-gradient(to right, rgba(70, 45, 20, .2), transparent 14%), var(--paper); box-shadow: 0 0 22px rgba(0, 0, 0, .28); }
-.book-turn-back { transform: rotateY(180deg); border-radius: 6px 0 0 6px; background: linear-gradient(to left, rgba(70, 45, 20, .2), transparent 14%), var(--paper); }
-@keyframes turn-forward { from { transform: translateZ(1px) rotateY(0deg); filter: brightness(1); } 50% { filter: brightness(.82); } to { transform: translateZ(1px) rotateY(-180deg); filter: brightness(1); } }
-@keyframes turn-back { from { transform: translateZ(1px) rotateY(-180deg); filter: brightness(1); } 50% { filter: brightness(.82); } to { transform: translateZ(1px) rotateY(0deg); filter: brightness(1); } }
+/*
+ * Page turn: a real leaf hinged on the spine, built from strips hinged to each other (narrower toward the free edge).
+ * Each strip carries its slice of the actual pages (see snapshotPage) on both faces, so the outgoing page lifts away to
+ * reveal the new memory beneath while the incoming page lands on the other side. The motion, curl, light and cast
+ * shadow are all keyframed from one physical track by playTurn; these rules only set up the geometry and the resting
+ * pose the leaf holds until it starts. No `filter` on the leaf (it flattens the 3D). Layers sit a few px apart in Z
+ * (ghost 1px, shadow 2px, leaf 4px) so they never z-fight near the spine.
+ */
+.book-turn-rig { --leaf-w: calc(var(--book-w) / 2 - 12px); position: absolute; inset: 0; pointer-events: none; transform-style: preserve-3d; }
+.book-turn-ghost, .book-turn-cast { position: absolute; top: 12px; bottom: 12px; }
+.book-turn-ghost { width: var(--leaf-w); transform: translateZ(1px); contain: strict; }
+.turn-forward .book-turn-ghost { left: 12px; }
+.turn-back .book-turn-ghost { left: 50%; }
+.book-turn-cast { width: var(--leaf-w); transform: translateZ(2px); opacity: 0; }
+.turn-cast-right { left: 50%; transform-origin: left center; border-radius: 0 6px 6px 0; background: linear-gradient(to right, rgba(40, 24, 8, .62), rgba(40, 24, 8, .2) 45%, transparent 85%); }
+.turn-cast-left { left: 12px; transform-origin: right center; border-radius: 6px 0 0 6px; background: linear-gradient(to left, rgba(40, 24, 8, .62), rgba(40, 24, 8, .2) 45%, transparent 85%); }
+/* The cover's opening swing still uses timed shadows. */
+@keyframes cast-leave { 0% { opacity: 0; } 20% { opacity: .95; } 62%, 100% { opacity: 0; } }
+@keyframes cast-land { 0%, 36% { opacity: 0; } 72% { opacity: .95; } 100% { opacity: 0; } }
+
+.book-turn { position: absolute; left: 50%; top: 12px; bottom: 12px; width: var(--leaf-w); transform-origin: left center; transform-style: preserve-3d; will-change: transform; transform: translateZ(4px); }
+.turn-back .book-turn { transform: translateZ(4px) rotateY(-180deg); }
+.turn-seg { position: absolute; top: 0; left: 0; width: calc(var(--w) * var(--leaf-w)); height: 100%; transform-origin: left center; transform-style: preserve-3d; will-change: transform; }
+.turn-seg > .turn-seg { left: 100%; }
+.turn-seg-face { position: absolute; inset: 0 -1px; backface-visibility: hidden; -webkit-backface-visibility: hidden; overflow: hidden; contain: strict; }
+.turn-seg-back { transform: rotateY(180deg); }
+.turn-seg-slot { position: absolute; inset: 0; }
+/* Each strip shows its slice of the full-width page copy; the back face is mirrored, so its offset counts from the free edge.
+   Faces overlap both neighbours by 1px, so whichever is in front at a bend covers the other's antialiased edge. */
+.turn-seg-front .turn-seg-slot > .book-page { position: absolute; top: 0; left: calc(var(--x) * var(--leaf-w) * -1 + 1px); width: var(--leaf-w); height: 100%; }
+.turn-seg-back .turn-seg-slot > .book-page { position: absolute; top: 0; left: calc((var(--x) + var(--w) - 1) * var(--leaf-w) + 1px); width: var(--leaf-w); height: 100%; }
+/* Shade deepens toward the free edge as a face turns away from the light; the sheen is a glint it sweeps through.
+   Both are leaf-wide gradients sliced per strip (background size/position set inline). */
+/* The ribbon belongs to the book, not the page, so it stays behind when a leaf turns. */
+.turn-seg-face .book-ribbon { display: none; }
+.turn-shade, .turn-sheen { position: absolute; inset: 0; z-index: 3; pointer-events: none; opacity: 0; background-repeat: no-repeat; }
+.turn-seg-front .turn-shade { background-image: linear-gradient(to right, rgba(50, 30, 10, .3), rgba(50, 30, 10, .6)); }
+.turn-seg-back .turn-shade { background-image: linear-gradient(to left, rgba(50, 30, 10, .3), rgba(50, 30, 10, .6)); }
+.turn-seg-front .turn-sheen { background-image: linear-gradient(100deg, transparent 20%, rgba(255, 250, 235, .55) 46%, transparent 72%); }
+.turn-seg-back .turn-sheen { background-image: linear-gradient(260deg, transparent 20%, rgba(255, 250, 235, .55) 46%, transparent 72%); }
 
 .book-footer { position: absolute; top: calc(100% + 18px); left: 50%; display: flex; align-items: center; gap: 14px; padding: 6px 8px; transform: translateX(-50%); border: 1px solid rgba(217, 180, 125, .35); border-radius: 999px; background: rgba(36, 24, 16, .72); color: #e9dcc4; font-size: 11px; letter-spacing: .14em; text-transform: uppercase; white-space: nowrap; }
-.book-animated .book-footer { animation: book-page-in .5s ease 1.2s both; }
+.book-animated .book-footer { animation: book-page-in .5s ease 1.3s both; }
 .book-animated.is-closing .book-footer { animation: none; opacity: 0; }
 .book-footer button { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 50%; background: rgba(217, 180, 125, .16); color: inherit; font-size: 20px; line-height: 1; transition: background .2s ease; }
 .book-footer button:hover:not(:disabled) { background: rgba(217, 180, 125, .36); }

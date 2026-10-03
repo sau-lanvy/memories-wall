@@ -144,7 +144,7 @@ function DomDecorationLayers({ layers, reducedMotion }: { layers: DecorationLaye
 }
 
 /** Renders the selected template's decorative scene without owning wall interaction. */
-export function ThreeWall({ memories, template, decorationLayers = [], lively = true }: { memories: Memory[]; template?: WallTemplate; decorationLayers?: DecorationLayer[]; lively?: boolean }) {
+export function ThreeWall({ memories, template, decorationLayers = [], lively = true, paused = false }: { memories: Memory[]; template?: WallTemplate; decorationLayers?: DecorationLayer[]; lively?: boolean; paused?: boolean }) {
   const cards = useMemo(() => memories, [memories]);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [canRender, setCanRender] = useState(false);
@@ -160,9 +160,9 @@ export function ThreeWall({ memories, template, decorationLayers = [], lively = 
     return () => { if (typeof query.removeEventListener === "function") query.removeEventListener("change", update); };
   }, []);
   const treatment = template?.visualTreatment ?? DEFAULT_TREATMENT;
-  return <div ref={setEventSource} aria-hidden="true" className="pointer-events-none absolute inset-0 hidden overflow-hidden rounded-lg opacity-90 md:block">
+  return <div ref={setEventSource} aria-hidden="true" className={`pointer-events-none absolute inset-0 hidden overflow-hidden rounded-lg opacity-90 md:block ${paused ? "motion-paused" : ""}`}>
     <DomDecorationLayers layers={decorationLayers} reducedMotion={reducedMotion} />
-    {canRender && eventSource && <Canvas eventSource={eventSource} orthographic camera={{ position: [0, 0, 8], zoom: 55 }} fallback={null} dpr={[1, 1.5]}>
+    {canRender && eventSource && <Canvas eventSource={eventSource} frameloop={paused ? "demand" : "always"} orthographic camera={{ position: [0, 0, 8], zoom: 55 }} fallback={null} dpr={[1, 1.5]}>
       <mesh position={[0, 0, -0.2]}><planeGeometry args={[20, 14]} /><meshBasicMaterial color={sceneColors[treatment.scene]} transparent opacity={0.22} /></mesh>
       <SceneField key={treatment.scene} scene={treatment.scene} intensity={treatment.intensity} animate={lively && !reducedMotion} />
       <ambientLight intensity={1.4} /><directionalLight position={[2, 3, 5]} intensity={1.2} />
